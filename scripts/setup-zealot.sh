@@ -49,6 +49,23 @@ done
 # Soon" and exits 0. khal's build script shells out to it, sees success, emits
 # no SPIR-V, and the failure only surfaces much later as a runtime panic about
 # a missing .spv. Detect that specifically rather than just checking presence.
+# On Metal, one `while ti < sd.ndofs { … ti += 1 }` loop in nexus's fused
+# FK/Jacobian/CRBA kernel runs ZERO times instead of once, leaving the DOF chain
+# empty, the Jacobian unwritten and the mass matrix never assembled — its LU
+# then produces NaN and the sim dies in a single step. Rewriting that loop as a
+# bounded, fully predicated `for` fixes it. Applied here rather than forked, so
+# the checkout stays upstream's. See docs/zealot-metal-nan.md.
+echo "==> nexus Metal Jacobian-loop patch"
+if git -C "$STACK/nexus" apply --check "$PWD/patches/nexus-metal-jacobian-loop.patch" 2>/dev/null; then
+  git -C "$STACK/nexus" apply "$PWD/patches/nexus-metal-jacobian-loop.patch"
+  echo "    applied"
+elif git -C "$STACK/nexus" apply --reverse --check "$PWD/patches/nexus-metal-jacobian-loop.patch" 2>/dev/null; then
+  echo "    already applied"
+else
+  echo "    WARNING: patch does not apply — upstream may have changed this kernel."
+  echo "    Without it the sim NaNs on Metal; check docs/zealot-metal-nan.md."
+fi
+
 echo "==> cargo-gpu"
 if ! command -v cargo-gpu >/dev/null 2>&1 || cargo gpu --version 2>&1 | grep -qi "coming soon"; then
   echo "    installing the real cargo-gpu from git"

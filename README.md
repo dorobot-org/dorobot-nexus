@@ -173,33 +173,36 @@ The architecture the design called for survives intact: the trainer is a job
 behind a metric stream, so `src/zealot.rs` swaps the producer and no screen
 knows the difference.
 
-### Known: the sim NaNs on Metal
+### The Metal NaN, and its fix
 
-Measured and written up in [docs/zealot-metal-nan.md](docs/zealot-metal-nan.md):
-one `env.step()` writes the multibody mass matrix as NaN (935 of 961 entries)
-from a fully finite `dof_state`, and everything downstream follows. Thirteen
-candidate causes are ruled out there by experiment.
+zealot's sim used to die inside a single `env.step()` on Apple Silicon: every
+pose, velocity and reward went NaN, so nothing could learn. The cause was one
+loop in nexus's fused FK/Jacobian/CRBA kernel —
+
+```rust
+let mut ti = 0u32;
+while ti < sd.ndofs { ...; ti += 1; }   // ndofs == 1 for a revolute joint
+```
+
+— running **zero times instead of once** on Metal, which left the DOF chain
+empty, the Jacobian unwritten and the mass matrix never assembled. Factorising
+that all-zero mass matrix produced the NaN. Rewriting it as a bounded, fully
+predicated `for` fixes it; `patches/nexus-metal-jacobian-loop.patch` is applied
+by `scripts/setup-zealot.sh`, so nothing is forked.
+
+GPU training on Metal works after that: finite rewards, real fall counts, live
+KL, ~3.5 s/iteration at 256 envs, and the zero-action probe falls at ~44 steps
+against the ~40 zealot documents. Full measurements and the reproduction are in
+[docs/zealot-metal-nan.md](docs/zealot-metal-nan.md).
 
 The trap worth knowing before trusting any rollout: **zealot resets on
 termination before recording the next frame**, so a policy that falls on step
 one still produces a clean, finite, upright trajectory — the spawn pose over
-and over. A real run here gave 51 frames with 50 resets and looked perfectly
-healthy. Running the same rollout with a trained policy and with all-zero
-actions produced byte-identical output, which is what gave it away. `Rollout`
-therefore parses `resets` and exposes `collapsed()`, and the sweep reports such
-cells as unmeasured rather than scoring them.
-
-
-zealot's 29-DoF G1 goes NaN at step 0 on Metal, so the GPU backend currently
-streams NaN rewards. This is upstream, not a packaging fault: everything below
-zealot passes its own GPU tests on this machine (vortx 14/14, nexus_rbd3d 5/5),
-the naga patch that fixes the known MSL miscompile is verifiably applied, and
-the failure is unchanged with terrain, spawn randomisation and decimation off
-on a mesh-free primitive model. zealot's own macOS guide documents a
-`contact_probe` verification that no longer exists after its restructure, and
-the healthy spawn height it records (0.718) does not match the current default
-robot (0.842), so that guide predates today's default. The CPU learner remains
-the default backend until this is resolved.
+and over. A broken run here gave 51 frames with 50 resets and looked perfectly
+healthy; running it with a trained policy and with all-zero actions produced
+byte-identical output, which is what gave it away. `Rollout` therefore parses
+`resets` and exposes `collapsed()`, and the sweep reports such cells as
+unmeasured rather than scoring them.
 
 ## Running it
 
