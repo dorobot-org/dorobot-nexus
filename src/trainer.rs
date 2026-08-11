@@ -11,7 +11,7 @@ use std::thread;
 use std::time::Instant;
 
 use crate::ckpt;
-use crate::env::{VecEnv, N_ACT, N_OBS, TERM_NAMES, TERM_WEIGHTS};
+use crate::env::{Randomization, VecEnv, N_ACT, N_OBS, TERM_NAMES, TERM_WEIGHTS};
 use crate::rl::{gae, Batch, Config, Ppo};
 use crate::rng::Rng;
 
@@ -55,6 +55,12 @@ impl Handle {
 
 /// Start a run. `envs` is the population, `total_steps` the budget in env-steps.
 pub fn spawn(envs: usize, total_steps: u64, seed: u64) -> Handle {
+    spawn_with(envs, total_steps, seed, true)
+}
+
+/// `randomize` off trains at nominal physics — the control case for the
+/// robustness sweep.
+pub fn spawn_with(envs: usize, total_steps: u64, seed: u64, randomize: bool) -> Handle {
     let shared = Arc::new(Mutex::new(Shared {
         samples: Vec::new(),
         running: true,
@@ -63,7 +69,7 @@ pub fn spawn(envs: usize, total_steps: u64, seed: u64) -> Handle {
     }));
     let (tx, rx) = mpsc::channel();
     let s = Arc::clone(&shared);
-    thread::spawn(move || run(envs, total_steps, seed, s, rx));
+    thread::spawn(move || run(envs, total_steps, seed, s, rx, randomize));
     Handle { shared, tx }
 }
 
@@ -80,9 +86,13 @@ fn run(
     seed: u64,
     shared: Arc<Mutex<Shared>>,
     rx: Receiver<Cmd>,
+    randomize: bool,
 ) {
     let mut rng = Rng::new(seed);
-    let mut env = VecEnv::new(n_envs, seed ^ 0x5DEE_CE66);
+    // Train across the distribution rather than at one point, which is what
+    // gives the robustness sweep anything to find.
+    let dist = if randomize { Randomization::TRAIN } else { Randomization::NONE };
+    let mut env = VecEnv::with_randomization(n_envs, seed ^ 0x5DEE_CE66, dist);
     let mut ppo = Ppo::new(N_OBS, N_ACT, 64, Config::default(), &mut rng);
 
     let mut obs: Vec<Vec<f32>> = vec![vec![0.0; N_OBS]; n_envs];

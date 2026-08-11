@@ -19,6 +19,7 @@ mod screens;
 mod rl;
 mod rng;
 mod state;
+mod sweep;
 mod trainer;
 mod ux;
 
@@ -34,7 +35,10 @@ use ux::Screen;
 /// to answer "is it learning" without judging it through a UI.
 fn headless(total: u64) -> ! {
     let envs = 256;
-    let h = trainer::spawn(envs, total, 1);
+    // --no-random trains at nominal physics, which is the control case for
+    // showing that the sweep measures anything at all.
+    let randomize = !std::env::args().any(|a| a == "--no-random");
+    let h = trainer::spawn_with(envs, total, 1, randomize);
     let mut shown = 0usize;
     loop {
         std::thread::sleep(std::time::Duration::from_millis(250));
@@ -64,8 +68,83 @@ fn headless(total: u64) -> ! {
 
 app_main!(App);
 
+/// `--sweep` runs the robustness sweep on the newest checkpoint and prints it.
+/// A surface you can only see in a GUI is a surface you cannot diff between
+/// two policies, which is the comparison that makes it worth computing.
+fn headless_sweep() -> ! {
+    let Some(surface) = sweep::spawn(trainer::RUN_ID) else {
+        eprintln!("no checkpoint to sweep");
+        std::process::exit(1);
+    };
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let g = surface.lock().unwrap();
+        if !g.running {
+            println!("mass\\force   {}", (0..sweep::COLS)
+                .map(|c| format!("{:>5.2}", sweep::axis_force(c)))
+                .collect::<Vec<_>>().join(" "));
+            for r in 0..sweep::ROWS {
+                let cells: Vec<String> = (0..sweep::COLS)
+                    .map(|c| match g.cell(r, c) {
+                        Some(v) => format!("{:>5.2}", v),
+                        None => "    —".into(),
+                    })
+                    .collect();
+                println!("{:>9.2}   {}", sweep::axis_mass(r), cells.join(" "));
+            }
+            println!("\n{:.0}% of cells pass", g.pass_fraction() * 100.0);
+            break;
+        }
+    }
+    std::process::exit(0);
+}
+
+/// `--track-check` asks the one question the flat sweep raised: does the policy
+/// respond to its velocity command at all?
+fn track_check() -> ! {
+    use crate::env::{VecEnv, N_ACT, N_OBS};
+    use crate::rl::{Config, Ppo};
+    let Some((path, m)) = ckpt::list(trainer::RUN_ID).into_iter().next() else {
+        eprintln!("no checkpoint");
+        std::process::exit(1);
+    };
+    let (w, _) = ckpt::read(&path).unwrap();
+    let mut rng = rng::Rng::new(1);
+    let hidden = if m.hidden == 0 { 64 } else { m.hidden };
+    let mut ppo = Ppo::new(N_OBS, N_ACT, hidden, Config::default(), &mut rng);
+    assert!(ppo.load_weights(&w));
+
+    println!("  cmd    mean dx   tracked");
+    for k in -3..=3 {
+        let cmd = k as f32 * 0.25;
+        let mut env = VecEnv::new(1, 5);
+        env.restart(0, cmd);
+        let (mut obs, mut act) = (vec![0.0; N_OBS], vec![0.0; N_ACT]);
+        let (mut sum_dx, mut n) = (0.0_f32, 0usize);
+        for _ in 0..400 {
+            env.observe(0, &mut obs);
+            ppo.act_mean(&obs, &mut act);
+            let o = env.step(&[act.clone()]);
+            // obs[1] is cart velocity.
+            env.observe(0, &mut obs);
+            sum_dx += obs[1];
+            n += 1;
+            if o.done[0] { break; }
+        }
+        let dx = sum_dx / n.max(1) as f32;
+        println!("{cmd:>6.2} {dx:>10.3} {:>9.2}", (-3.0 * (dx - cmd).abs()).exp());
+    }
+    std::process::exit(0);
+}
+
 fn maybe_headless() {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--track-check") {
+        track_check();
+    }
+    if args.iter().any(|a| a == "--sweep") {
+        headless_sweep();
+    }
     if let Some(i) = args.iter().position(|a| a == "--headless") {
         let n: u64 = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(2_000_000);
         headless(n);
@@ -128,6 +207,8 @@ pub struct App {
     /// A checkpoint being driven in Inspect.
     #[rust]
     probe: Option<probe::Probe>,
+    #[rust]
+    surface: Option<std::sync::Arc<std::sync::Mutex<sweep::Surface>>>,
 }
 
 impl App {
@@ -149,7 +230,11 @@ impl App {
         self.ui.task_screen(cx, ids!(page_task)).sync(cx, &run);
         self.ui.train_screen(cx, ids!(page_train)).sync(cx, &run);
         self.ui.inspect_screen(cx, ids!(page_inspect)).sync(cx, self.probe.as_ref());
-        self.ui.validate_screen(cx, ids!(page_validate)).sync(cx);
+        let surf = self.surface.as_ref().and_then(|s| s.lock().ok());
+        self.ui
+            .validate_screen(cx, ids!(page_validate))
+            .sync(cx, surf.as_deref());
+        drop(surf);
 
         let live = self
             .trainer
@@ -222,6 +307,7 @@ impl MatchEvent for App {
         if let Some(p) = self.probe.as_mut() {
             p.tick();
         }
+        // The sweep fills in cell by cell; the same tick shows its progress.
         self.sync(cx);
         self.ui.redraw(cx);
     }
@@ -278,6 +364,14 @@ impl MatchEvent for App {
                 }
                 dirty = true;
             }
+        }
+
+        if self.ui.validate_screen(cx, ids!(page_validate)).clicked_run(cx, actions) {
+            match sweep::spawn(trainer::RUN_ID) {
+                Some(s) => self.surface = Some(s),
+                None => ::log::info!("sweep: no checkpoint to sweep yet"),
+            }
+            dirty = true;
         }
 
         if self.ui.scene_screen(cx, ids!(page_scene)).clicked_add(cx, actions) {

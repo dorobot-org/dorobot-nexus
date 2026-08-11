@@ -181,6 +181,32 @@ impl Run {
             }
         }
 
+        // Found by using this product on its own trainer: the policy solved
+        // the easy half of the task and ignored the rest. Balancing scores the
+        // upright term while never moving, so reward and fall rate both look
+        // healthy and only the tracking term gives it away.
+        if let (Some(track), Some(upright)) = (
+            self.terms.iter().find(|t| t.name == "track_lin_vel"),
+            self.terms.iter().find(|t| t.name == "upright"),
+        ) {
+            let falls = self.fall_rate.last().copied().unwrap_or(1.0);
+            let t_now = track.series.last().copied().unwrap_or(0.0);
+            let u_now = upright.series.last().copied().unwrap_or(0.0);
+            let t_trend = trend(&track.series).unwrap_or(1.0);
+            if falls < 0.05 && u_now > 0.8 && t_now < 0.55 && t_trend < 0.01 {
+                out.push(Finding {
+                    headline: "Command ignored".into(),
+                    detail: format!(
+                        "Upright is at {u_now:.2} and nothing is falling, but tracking has \
+                         stalled at {t_now:.2}. The policy has solved the easy half of the task \
+                         and is standing still — check that following the command is reachable \
+                         at all before spending more steps."
+                    ),
+                    tone: 2.0,
+                });
+            }
+        }
+
         if self.throughput.len() > 4 {
             let head = mean(&self.throughput[..self.throughput.len() / 3]);
             let tail = mean(&self.throughput[self.throughput.len() * 2 / 3..]);
@@ -428,6 +454,44 @@ mod tests {
         assert!(
             found.iter().any(|f| f.headline == "Reward hacking"),
             "expected the hacking signature, got {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_policy_that_stands_still_is_named() {
+        // Upright solved, nothing falling, tracking flat and low.
+        let n = 40;
+        let run = Run {
+            terms: vec![
+                Term { name: "track_lin_vel".into(), weight: 1.0, series: vec![0.40; n] },
+                Term { name: "upright".into(), weight: 0.5, series: vec![0.95; n] },
+            ],
+            fall_rate: vec![0.0; n],
+            throughput: vec![40.0; n],
+            ..sample_runs()[2].clone()
+        };
+        let found = run.findings();
+        assert!(
+            found.iter().any(|f| f.headline == "Command ignored"),
+            "expected the standing-still signature, got {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_tracking_policy_is_not_flagged() {
+        let n = 40;
+        let run = Run {
+            terms: vec![
+                Term { name: "track_lin_vel".into(), weight: 1.0, series: vec![0.88; n] },
+                Term { name: "upright".into(), weight: 0.5, series: vec![0.95; n] },
+            ],
+            fall_rate: vec![0.0; n],
+            throughput: vec![40.0; n],
+            ..sample_runs()[2].clone()
+        };
+        assert!(
+            !run.findings().iter().any(|f| f.headline == "Command ignored"),
+            "a policy that tracks must not be flagged"
         );
     }
 

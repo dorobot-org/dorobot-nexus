@@ -68,11 +68,53 @@ answering at 0.88 of full effort, reward dropping and climbing back.
 Restart also pulls in any newer checkpoint, so a probe left open while training
 continues does not stay stuck on the policy it first loaded.
 
+**Domain randomization is real.** Pole mass, actuator authority and cart drag
+are drawn per episode from a declared distribution, and training runs across it.
+
+**The robustness sweep is real.** Validate runs the newest checkpoint across a
+grid of physics — force 0.25–2.0×, pole mass 0.3–5.0×, deliberately wider than
+the training distribution — twelve episodes per cell, and scores each cell by
+how well the policy did the task there. It runs on its own thread and fills in
+live. `--sweep` prints the same surface as text, so two policies can be diffed.
+
 **Not real:** no GPU physics — see below. No robot import; that control logs
-that it is unbuilt rather than pretending. Scene's randomization sliders are not
-connected to the environment, which has none. Validate's robustness surface is a
-closed-form shape, not a sweep. Runs 2 and 3 are fixtures, and the screen says
-so.
+that it is unbuilt rather than pretending. Scene's randomization sliders display
+the distribution but cannot yet edit it. The cross-simulator panel has no second
+simulator behind it and says so instead of printing numbers. Runs 2 and 3 are
+fixtures, and the screen says so.
+
+## What the sweep found
+
+Worth recording, because it is the product working as intended and it is not a
+flattering result.
+
+The first sweep scored cells by *survival* and returned 100% everywhere — for a
+policy trained with randomization **and** for a control trained without it. A
+measurement that cannot fail is not a measurement. Scoring the task instead
+(tracking quality, with a fall scoring zero) made the surface honest, and it now
+reads about 0.40 uniformly.
+
+That number is diagnostic. `--track-check` shows why: commanded −0.75 m/s, the
+policy achieves −0.005. **It learned to balance and ignore the velocity
+command.** 0.40 is exactly the mean of `exp(-3|cmd|)` over the command spread —
+the score of standing perfectly still.
+
+Chasing that turned up a genuine specification bug. Episodes terminated when the
+cart left a ±3 m box, and that termination counted as a fall — but tracking any
+command above 0.375 m/s leaves a 3 m box before the episode ends. The task
+contradicted itself, and the policy correctly learned that moving meant death.
+The track is now 30 m and running off it is no longer a fall.
+
+Fixing it was not sufficient: the policy still stands still. Accelerating a
+cart-pole forward requires first pushing backward to tip the pole, and that
+non-minimum-phase manoeuvre is hard to discover. Wider reward kernels and more
+entropy did not find it either, and both changes were reverted rather than left
+in as unjustified tuning. **Velocity tracking is not solved here.**
+
+The useful outcome is that the failure is now a named entry in the diagnosis
+catalogue. A run that is upright, not falling, and flat on tracking reports
+*Command ignored*, with the live numbers — so the next person does not spend an
+hour finding it by hand.
 
 ## Why nexus and zealot are not linked
 
