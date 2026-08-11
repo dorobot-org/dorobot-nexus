@@ -18,11 +18,11 @@
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, TryRecvError};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::trainer::{Cmd, Handle, Sample, Shared};
+use crate::trainer::{Handle, Sample, Shared};
 
 /// Where the trainer binary is expected, unless `DOROBOT_ZEALOT_BIN` says
 /// otherwise. `scripts/setup-zealot.sh` builds exactly this path.
@@ -74,20 +74,31 @@ pub fn spawn(envs: usize, iters: u64, ckpt: &str) -> Option<Handle> {
     let (tx, rx) = mpsc::channel();
     let s = Arc::clone(&shared);
 
+    let mut child = child;
+    let stdout = child.stdout.take()?;
+    // The child outlives a naive stop: the reader blocks in `lines()`, and
+    // zealot prints roughly every four seconds, so a stop checked between
+    // lines arrives late — or never, if the app is closing. A watcher blocked
+    // on the channel kills it immediately instead, which is what keeps a
+    // window close from leaking a GPU trainer.
+    let child = Arc::new(Mutex::new(child));
+    let watched = Arc::clone(&child);
     thread::spawn(move || {
-        let mut child = child;
-        let stdout = match child.stdout.take() {
-            Some(o) => o,
-            None => return,
-        };
+        // Both a Stop and a hung-up sender (the Handle dropped) mean the same
+        // thing here: nobody is left who wants this run.
+        let _ = rx.recv();
+        if let Ok(mut c) = watched.lock() {
+            let _ = c.kill();
+        }
+    });
+
+    thread::spawn(move || {
         let mut pending = Row::default();
         let mut cumulative: u64 = 0;
 
+        // No stop check here: the watcher kills the child, which closes this
+        // pipe and ends the loop. One owner of that decision, not two.
         for line in BufReader::new(stdout).lines() {
-            match rx.try_recv() {
-                Ok(Cmd::Stop) | Err(TryRecvError::Disconnected) => break,
-                Err(TryRecvError::Empty) => {}
-            }
             let Ok(line) = line else { break };
 
             // A run emits the table row first, then the `[rb]` breakdown for
@@ -126,8 +137,12 @@ pub fn spawn(envs: usize, iters: u64, ckpt: &str) -> Option<Handle> {
             }
         }
 
-        let _ = child.kill();
-        let _ = child.wait();
+        // Reap it whether it ended on its own or the watcher killed it, so a
+        // finished run leaves no zombie behind.
+        if let Ok(mut c) = child.lock() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
         if let Ok(mut g) = s.lock() {
             g.running = false;
         }

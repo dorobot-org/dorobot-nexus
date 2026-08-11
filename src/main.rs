@@ -318,7 +318,9 @@ impl MatchEvent for App {
         #[cfg(feature = "zealot")]
         {
             self.trainer = zealot::spawn(256, 2_000, "dorobot_nexus.safetensors");
-            if self.trainer.is_none() {
+            if self.trainer.is_some() {
+                ::log::info!("backend: zealot ({})", zealot::binary_path().display());
+            } else {
                 ::log::warn!(
                     "zealot binary not found at {} — falling back to the CPU trainer \
                      (run scripts/setup-zealot.sh to build it)",
