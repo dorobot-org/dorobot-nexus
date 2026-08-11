@@ -99,6 +99,36 @@ Finite reward, real fall counts, finite KL with the adaptive learning rate
 responding to it — 3.5 s/iteration at 256 envs. Previously every one of these
 was `NaN` with all 6144 samples terminating.
 
+And it learns. 600 iterations at 512 envs on flat ground, ~5 s/iteration:
+
+```
+iter 100  −0.4108   falls 5674   ← trough
+iter 200  −0.3837   falls 5571
+iter 300  −0.3336   falls 5100
+iter 400  −0.2279   falls 3758
+iter 500  −0.1523   falls 2763
+iter 599  −0.0956   falls 2012   curriculum 0.00 → 0.40
+```
+
+Reward up 77% from the trough and falls down 65%, monotonic, while the
+curriculum was *raising* difficulty throughout.
+
+The aggregate curve understates it, which is worth noting because it nearly led
+to the wrong conclusion here. Between iter 0 and 100 total reward fell while
+almost every behavioural term improved — `track_lin_vel` 0.026 → 0.081,
+`upright` 0.018 → 0.034, `foot_slip` −0.062 → −0.012, `action_rate_rate`
+−0.350 → −0.055 — and the total was dragged down entirely by the `termination`
+penalty growing to −0.92 as a more active policy terminated more often. A single
+reward curve would have read as "not learning"; the per-term decomposition
+showed otherwise.
+
+The behaviour transfers. Same command, same 4-second rollout, flat ground:
+
+| policy | resets / frames | survival |
+|---|---|---|
+| 30 iterations | 93 / 201 | 54% |
+| 600 iterations | 33 / 201 | **84%** |
+
 ## How it was found, and the trap that hid it
 
 The failure looked like it did not exist. **zealot resets on termination
