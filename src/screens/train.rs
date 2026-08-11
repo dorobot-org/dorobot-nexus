@@ -312,8 +312,13 @@ impl TrainScreenRef {
         let fallen = (fall_rate * CELLS.len() as f64).round() as usize;
         for (i, path) in CELLS.iter().enumerate() {
             let fell = if i < fallen { 1.0 } else { 0.0 };
-            // A stable pseudo-lean per cell; no randomness, so redraws are calm.
-            let lean = ((i as f64 * 2.399).sin()) * 0.6;
+            // Live pose when the trainer supplies one; otherwise a stable
+            // pseudo-lean so a fixture run still reads as a population.
+            let lean = run
+                .leans
+                .get(i)
+                .map(|l| *l as f64)
+                .unwrap_or_else(|| (i as f64 * 2.399).sin() * 0.6);
             let mut w = root.widget(cx, path);
             script_apply_eval!(cx, w, { draw_bg +: { lean: #(lean) fell: #(fell) } });
         }

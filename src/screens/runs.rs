@@ -116,7 +116,7 @@ impl RunsScreenRef {
         let root = &mut inner.view;
 
         root.label(cx, ids!(head.note))
-            .set_text(cx, "metrics are generated — no trainer attached");
+            .set_text(cx, "run 1 is live · the others are fixtures");
 
         for (i, path) in CARDS.iter().enumerate() {
             let card = root.widget(cx, path);

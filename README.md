@@ -18,36 +18,77 @@ hands off.
 
 ## Status
 
-The six surfaces are built and the app runs with zero script-VM errors. **The
-trainer is not attached.** Metrics are generated, and the app says so on screen
-rather than hiding it — a plausible curve that nothing produced is the most
-expensive lie a tool like this can tell.
+Six surfaces, zero script-VM errors, and **a trainer that actually learns**.
 
-What is real today:
+Launch it and the Train screen is showing a live run: PPO on 256 parallel
+environments at ~41k env-steps/s, per-term reward curves, a contact sheet of
+live poses with falls tinted, and the diagnosis rail reading real metrics.
 
-- **The robot.** The Unitree G1 at 29 DOF, rendered from its actual URDF through
-  `makepad-urdf-player` — 39 links, 35 with meshes, 29 movable joints.
-- **The diagnosis catalogue.** Named failure signatures matched against run
-  metrics, in `src/state.rs`, with tests. Given a run whose reward climbs while
-  its fall rate climbs, the app reports *reward hacking*, names the term
-  climbing fastest, and says what to try.
-- **The plot widget.** Multi-series curves resampled per pixel column, in
-  `src/plot.rs`.
-- **The screens.** Runs, Scene, Task, Train, Inspect, Validate — navigable, with
-  real layout and real state flowing through them.
+The task is balance-and-velocity-tracking on an inverted pendulum — not the G1.
+It is the smallest task carrying the *shape* of the whole-body problem (stay
+upright while tracking a commanded velocity, with the same named reward terms),
+so the loop, the reward decomposition and the diagnosis are exercised by real
+numbers. Verified end to end:
 
-What is not:
+```
+$ dorobot-nexus --headless 1200000
+     8192 steps  reward  0.636  falls 100.0%  ep_len    24      40k steps/s
+   557056 steps  reward  0.610  falls 100.0%  ep_len    66      41k steps/s
+   802816 steps  reward  0.713  falls   8.0%  ep_len   397      41k steps/s
+  1171456 steps  reward  0.757  falls   0.0%  ep_len   400      41k steps/s
+```
 
-- No simulator. `nexus` is not linked; the environment grid is schematic.
-- No trainer. `zealot-rl` is not linked; there is no learning.
-- No robot import. The Add robot flow is designed but not built, and the control
-  logs that rather than pretending.
+Falls 100% → 0%, episode length 24 → 400 (the cap). It solves the task.
+
+**Real today:** PPO/GAE/Adam with a hand-rolled MLP and explicit backward passes
+(`src/rl.rs`, gradient-checked against finite differences); a vectorised
+environment (`src/env.rs`); a seeded reproducible RNG (`src/rng.rs`); the
+trainer on its own thread publishing snapshots over a channel (`src/trainer.rs`);
+the Unitree G1 at 29 DOF rendered from its real URDF; the diagnosis catalogue;
+and a multi-series plot widget. 12 tests.
+
+**Not real:** no GPU physics — see below. No robot import; that control logs
+that it is unbuilt rather than pretending. Checkpoints are scored but not
+written to disk. Runs 2 and 3 in the list are fixtures, and the screen says so.
+
+## Why nexus and zealot are not linked
+
+The design premise was that nexus and makepad could share one GPU device in one
+process. Both halves of that turned out to be wrong here, and the evidence is
+worth recording rather than quietly dropping.
+
+**The dimforge GPU stack cannot be built outside its authors' machines.**
+`nexus3d` is not published to crates.io — zealot depends on it by path, at
+`../nexus/crates/nexus3d`. Its shaders need `cargo-gpu` (installable, and I did
+install it), but the crates.io `vortx 0.3.0` then fails to emit its SPIR-V:
+
+```
+error: proc macro panicked
+  --> vortx-0.3.0/src/lib.rs:12:38
+   = help: ".../out/shaders-spirv" is not a directory
+```
+
+zealot's own manifest explains why: it redirects `vortx`, `khal` and `rapier3d`
+to **unpublished local dimforge forks** via `[patch.crates-io]`, plus a vendored
+`naga` carrying a fix for a Metal miscompilation — without which, in their
+words, "the biped free-fell then launched on macOS". None of those forks are
+public.
+
+**And makepad does not use wgpu on macOS.** It renders through Metal directly
+(`platform/src/os/apple/metal.rs`; no wgpu anywhere in `makepad-platform`). So
+even with the stack building, nexus and the UI would be two GPU contexts in one
+process on this platform — one process, but not one device.
+
+The architecture the design already called for survives this intact: the trainer
+is a job behind a metric stream. Swapping this CPU learner for a GPU one is a
+change to `src/trainer.rs` and nothing else — no screen knows the difference.
 
 ## Running it
 
 ```
 tools/fetch_robot_meshes.py g1     # 20 MB, once
-cargo run --release
+cargo run --release                # the studio, training live
+cargo run --release -- --headless 2000000   # train without a window
 ```
 
 Meshes are fetched rather than committed. Upstream ships 167 files at 110 MB
@@ -86,6 +127,10 @@ takes. Full design rationale, including mockups, is in
 ```
 src/ux.rs          design tokens, chrome, nav rail
 src/plot.rs        multi-series line plot widget
+src/rl.rs          PPO, GAE, Adam, MLP with explicit backward (tested)
+src/env.rs         vectorised balance-and-track environment (tested)
+src/rng.rs         seeded reproducible RNG (tested)
+src/trainer.rs     the training thread and its metric channel
 src/state.rs       run model + the diagnosis catalogue (tested)
 src/screens/       the six surfaces
 data/g1/           Unitree G1 URDF (BSD-3-Clause, Unitree Robotics)
@@ -94,6 +139,8 @@ data/g1/           Unitree G1 URDF (BSD-3-Clause, Unitree Robotics)
 ## Credits
 
 [zealot](https://github.com/haixuanTao/zealot) is the training stack this is a
-console for; [nexus](https://github.com/dimforge/nexus) is the physics engine
-underneath it. Neither is linked yet. The G1 model is from
+console for, and `src/rl.rs` implements the same algorithm its `zealot-rl`
+implements on the GPU (itself a port of rsl_rl);
+[nexus](https://github.com/dimforge/nexus) is the physics engine underneath it.
+Neither is linked, for the reasons above. The G1 model is from
 [unitree_ros](https://github.com/unitreerobotics/unitree_ros), BSD-3-Clause.

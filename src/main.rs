@@ -11,9 +11,13 @@
 
 use makepad_widgets::*;
 
+mod env;
 mod plot;
 mod screens;
+mod rl;
+mod rng;
 mod state;
+mod trainer;
 mod ux;
 
 use screens::{
@@ -24,7 +28,47 @@ use screens::{
 use state::Studio;
 use ux::Screen;
 
+/// `--headless N` trains without a window and prints progress. The fastest way
+/// to answer "is it learning" without judging it through a UI.
+fn headless(total: u64) -> ! {
+    let envs = 256;
+    let h = trainer::spawn(envs, total, 1);
+    let mut shown = 0usize;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let (n, done, line) = {
+            let g = h.shared.lock().unwrap();
+            let line = g.samples.last().map(|s| {
+                format!(
+                    "{:>9} steps  reward {:>6.3}  falls {:>5.1}%  ep_len {:>5.0}  {:>6.0}k steps/s",
+                    s.step, s.reward, s.fall_rate * 100.0, s.episode_len,
+                    s.steps_per_sec / 1000.0
+                )
+            });
+            (g.samples.len(), !g.running, line)
+        };
+        if n > shown {
+            if let Some(l) = line {
+                println!("{l}");
+            }
+            shown = n;
+        }
+        if done {
+            break;
+        }
+    }
+    std::process::exit(0);
+}
+
 app_main!(App);
+
+fn maybe_headless() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--headless") {
+        let n: u64 = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(2_000_000);
+        headless(n);
+    }
+}
 
 fn new_state() -> Studio {
     Studio::new()
@@ -74,6 +118,11 @@ pub struct App {
     ui: WidgetRef,
     #[rust(new_state())]
     app: Studio,
+    /// The live run. The UI never calls into it; it reads snapshots.
+    #[rust]
+    trainer: Option<trainer::Handle>,
+    #[rust]
+    poll: Timer,
 }
 
 impl App {
@@ -97,9 +146,18 @@ impl App {
         self.ui.inspect_screen(cx, ids!(page_inspect)).sync(cx, &robot, &ckpt);
         self.ui.validate_screen(cx, ids!(page_validate)).sync(cx);
 
+        let live = self
+            .trainer
+            .as_ref()
+            .and_then(|h| h.shared.lock().ok().map(|g| (g.running, g.samples.len())));
+        let status = match live {
+            Some((true, n)) => format!("cpu · training · {n} intervals"),
+            Some((false, _)) => "cpu · run finished".to_string(),
+            None => "idle".to_string(),
+        };
         self.ui
             .label(cx, ids!(app_bar.device))
-            .set_text(cx, &format!("{} · no trainer attached", device_line()));
+            .set_text(cx, &format!("{} · {status}", device_line()));
 
         // Overlay flow: exactly one page is visible.
         for (path, screen) in [
@@ -129,7 +187,30 @@ fn device_line() -> &'static str {
 
 impl MatchEvent for App {
     fn handle_startup(&mut self, cx: &mut Cx) {
+        // 256 environments for 4M steps: enough that the balance task is solved
+        // while you watch, which is the point of having the screen at all.
+        self.trainer = Some(trainer::spawn(256, 4_000_000, 1));
+        self.poll = cx.start_interval(0.2);
         self.sync(cx);
+    }
+
+    fn handle_timer(&mut self, cx: &mut Cx, e: &TimerEvent) {
+        if self.poll.is_timer(e).is_none() {
+            return;
+        }
+        let Some(h) = &self.trainer else { return };
+        let (samples, envs, total) = {
+            let Ok(g) = h.shared.lock() else { return };
+            (g.samples.clone(), g.envs as u32, g.total_steps)
+        };
+        if samples.is_empty() {
+            return;
+        }
+        // Same Run shape as the fixtures, so every screen and the diagnosis
+        // catalogue work on live data without knowing the difference.
+        self.app.runs[0] = state::live_run(&samples, envs, total, 1);
+        self.sync(cx);
+        self.ui.redraw(cx);
     }
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
@@ -169,6 +250,7 @@ impl MatchEvent for App {
 
 impl AppMain for App {
     fn script_mod(vm: &mut ScriptVm) -> ScriptValue {
+        maybe_headless();
         makepad_widgets::script_mod(vm);
         // RobotView draws into an XR scene, so both register before anything
         // that mounts one.

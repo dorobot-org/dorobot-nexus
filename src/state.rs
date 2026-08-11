@@ -10,6 +10,9 @@
 
 use std::path::PathBuf;
 
+use crate::env::{TERM_NAMES, TERM_WEIGHTS};
+use crate::trainer::Sample;
+
 /// A reward term, named so it can be blamed individually.
 #[derive(Clone, Debug)]
 pub struct Term {
@@ -89,6 +92,8 @@ pub struct Run {
     /// Throughput over the run, for the collapse detector.
     pub throughput: Vec<f64>,
     pub checkpoints: Vec<Checkpoint>,
+    /// Lean of a sample of environments, for the contact sheet.
+    pub leans: Vec<f32>,
 }
 
 impl Run {
@@ -100,8 +105,12 @@ impl Run {
     }
 
     pub fn elapsed_label(&self) -> String {
-        let m = (self.elapsed_s / 60.0) as u64;
-        format!("{:02}:{:02}", m / 60, m % 60)
+        let t = self.elapsed_s as u64;
+        if t < 3600 {
+            format!("{:02}:{:02}", t / 60, t % 60)
+        } else {
+            format!("{}:{:02}:{:02}", t / 3600, (t % 3600) / 60, t % 60)
+        }
     }
 
     pub fn steps_label(&self) -> String {
@@ -217,6 +226,58 @@ fn mean(xs: &[f64]) -> f64 {
     xs.iter().sum::<f64>() / xs.len() as f64
 }
 
+/// Build a run from what the trainer has published so far.
+///
+/// This is the path that replaces the generated fixtures: same `Run` shape, so
+/// every screen and the diagnosis catalogue work unchanged on live data.
+pub fn live_run(samples: &[Sample], envs: u32, total_steps: u64, seed: u64) -> Run {
+    let last = samples.last();
+    let terms = TERM_NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, name)| Term {
+            name: (*name).to_string(),
+            weight: TERM_WEIGHTS[i] as f64,
+            series: samples
+                .iter()
+                .map(|s| s.terms.get(i).copied().unwrap_or(0.0) as f64)
+                .collect(),
+        })
+        .collect();
+
+    let steps = last.map(|s| s.step).unwrap_or(0);
+    let best = samples
+        .iter()
+        .map(|s| s.reward as f64)
+        .fold(f64::MIN, f64::max);
+
+    Run {
+        id: "balance-track-01".into(),
+        robot: "cart-pole".into(),
+        scene: "balance + velocity tracking".into(),
+        seed,
+        state: if steps >= total_steps { RunState::Trained } else { RunState::Training },
+        envs,
+        steps,
+        total_steps,
+        steps_per_sec: last.map(|s| s.steps_per_sec).unwrap_or(0.0),
+        elapsed_s: last
+            .map(|s| s.step as f64 / s.steps_per_sec.max(1.0))
+            .unwrap_or(0.0),
+        terms,
+        fall_rate: samples.iter().map(|s| s.fall_rate as f64).collect(),
+        throughput: samples.iter().map(|s| s.steps_per_sec / 1000.0).collect(),
+        // Checkpoints are not written yet; the best interval stands in for the
+        // score so the rail is not empty and does not invent a filename.
+        checkpoints: if samples.is_empty() {
+            Vec::new()
+        } else {
+            vec![Checkpoint { step: steps, score: best }]
+        },
+        leans: last.map(|s| s.leans.clone()).unwrap_or_default(),
+    }
+}
+
 /// A robot the app can simulate.
 #[derive(Clone, Debug)]
 pub struct Robot {
@@ -305,6 +366,7 @@ fn sample_runs() -> Vec<Run> {
             terms: terms(0.51),
             fall_rate: falls_down,
             throughput: flat_tp.clone(),
+            leans: Vec::new(),
             checkpoints: vec![
                 Checkpoint { step: 160_000_000, score: 0.81 },
                 Checkpoint { step: 150_000_000, score: 0.79 },
@@ -327,6 +389,7 @@ fn sample_runs() -> Vec<Run> {
             terms: terms(0.95),
             fall_rate: falls_up,
             throughput: flat_tp,
+            leans: Vec::new(),
             checkpoints: vec![Checkpoint { step: 400_000_000, score: 0.44 }],
         },
         Run {
@@ -343,6 +406,7 @@ fn sample_runs() -> Vec<Run> {
             terms: terms(0.40),
             fall_rate: curve(0.30, 0.02, 3.6),
             throughput: (0..N).map(|_| 71.0).collect(),
+            leans: Vec::new(),
             checkpoints: vec![Checkpoint { step: 200_000_000, score: 0.93 }],
         },
     ]
