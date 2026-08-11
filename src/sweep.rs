@@ -53,6 +53,10 @@ pub struct Surface {
     /// sweep, whose axes the screen names itself; a zealot sweep varies
     /// different physics and says so rather than borrowing those labels.
     pub axes: String,
+    /// Cells whose rollout terminated on nearly every step. These are reported
+    /// as unmeasured, and counted here so the screen can say why the grid is
+    /// empty instead of showing a blank that reads as "not run yet".
+    pub collapsed: usize,
 }
 
 impl Surface {
@@ -230,6 +234,7 @@ pub mod zealot_sweep {
                 "PD gain {:.2}× → {:.2}×   ·   friction {:.2} → {:.2}",
                 KP_RANGE.0, KP_RANGE.1, FRICTION_RANGE.0, FRICTION_RANGE.1
             ),
+            collapsed: 0,
         }));
 
         let out = Arc::clone(&surface);
@@ -244,16 +249,26 @@ pub mod zealot_sweep {
                         ("BIPED_SPAWN_DR", "0".to_string()),
                     ];
                     let cmd = Drive { vx: COMMAND_VX, seconds: SECONDS, ..Drive::default() };
-                    let cell = match zealot::drive(&ckpt, cmd, &knobs) {
-                        // A rollout that never produced a trajectory is not a
-                        // zero — it is an unmeasured cell, and the surface
-                        // distinguishes the two.
-                        Some(r) if !r.is_empty() => score(r.achieved_vx(), r.fell(FLOOR)),
+                    let r = zealot::drive(&ckpt, cmd, &knobs);
+                    // A collapsed rollout is unmeasured, not zero. zealot
+                    // resets on termination before recording the next frame,
+                    // so a policy that falls every step still yields a clean
+                    // upright trajectory — the spawn pose over and over — and
+                    // scoring it would fill the grid with numbers that measure
+                    // nothing. Both "no rollout" and "collapsed" stay -1.
+                    let collapsed = r.as_ref().is_some_and(|r| r.collapsed());
+                    let cell = match &r {
+                        Some(r) if !r.is_empty() && !collapsed => {
+                            score(r.achieved_vx(), r.fell(FLOOR))
+                        }
                         _ => -1.0,
                     };
                     if let Ok(mut s) = out.lock() {
                         s.cells[row * COLS + col] = cell;
                         s.done += 1;
+                        if collapsed {
+                            s.collapsed += 1;
+                        }
                     }
                 }
             }

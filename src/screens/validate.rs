@@ -9,6 +9,15 @@ use crate::ux;
 /// What the two axes varied. A sweep that names someone else's axes is worse
 /// than one with no caption, so the surface carries its own when it has one.
 fn axis_label(s: &Surface) -> String {
+    // An empty grid because every rollout collapsed is a finding, not a blank.
+    // Saying so beats a caption describing axes that measured nothing.
+    if s.collapsed > 0 {
+        return format!(
+            "{} of {} cells unmeasured: the episode terminated on nearly every \
+             step, so no rollout tested the physics",
+            s.collapsed, s.done
+        );
+    }
     if !s.axes.is_empty() {
         return s.axes.clone();
     }

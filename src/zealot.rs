@@ -64,6 +64,23 @@ pub struct Rollout {
     pub joint_names: Vec<String>,
     pub base: Vec<[f32; 7]>,
     pub joints: Vec<Vec<f32>>,
+    /// Step indices where the episode terminated and the env was teleported
+    /// back to its spawn.
+    pub resets: Vec<usize>,
+}
+
+impl Rollout {
+    /// True when the episode ended on (nearly) every step.
+    ///
+    /// This is not a detail. zealot resets on termination *before* it records
+    /// the next frame, so a policy that falls immediately still produces a
+    /// clean, finite, upright-looking trajectory — the spawn pose, recorded
+    /// over and over. Every derived number then looks plausible and measures
+    /// nothing. Anything reporting on a rollout has to ask this first.
+    pub fn collapsed(&self) -> bool {
+        let n = self.len();
+        n > 1 && self.resets.len() * 2 >= n
+    }
 }
 
 impl Rollout {
@@ -277,7 +294,26 @@ pub fn parse_rollout(text: &str) -> Option<Rollout> {
             .map(|r| [r[0], r[1], r[2], r[3], r[4], r[5], r[6]])
             .collect(),
         joints: joints2d,
+        resets: array1(text, "resets")
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| v as usize)
+            .collect(),
     })
+}
+
+/// A flat `[…]` of numbers under `key`.
+fn array1(text: &str, key: &str) -> Option<Vec<f32>> {
+    let start = after_key(text, key)?;
+    let rest = &text[start..];
+    let open = rest.find('[')?;
+    let close = rest[open..].find(']')? + open;
+    Some(
+        rest[open + 1..close]
+            .split(',')
+            .filter_map(|v| v.trim().parse::<f32>().ok())
+            .collect(),
+    )
 }
 
 /// Byte offset just past `"key":`, so a later key never matches an earlier
@@ -597,6 +633,26 @@ mod tests {
         // pinning the index mapping, not just the row length.
         assert!((r.joints[2][3] - 0.040).abs() < 1e-5, "left knee");
         assert!((r.joints[2][9] - 0.042).abs() < 1e-5, "right knee");
+    }
+
+    /// A real `biped_drive` run on Metal returned 51 frames with 50 resets —
+    /// the episode ended on every step, and the recorded trajectory was the
+    /// spawn pose over and over. It looked upright, finite and plausible.
+    /// Detecting that is what stops the sweep reporting numbers for a rollout
+    /// that never tested anything.
+    #[test]
+    fn a_rollout_that_resets_every_step_is_collapsed() {
+        let healthy = parse_rollout(ROLLOUT).expect("rollout");
+        assert!(healthy.resets.is_empty());
+        assert!(!healthy.collapsed(), "a clean rollout must not read as collapsed");
+
+        let every_step = parse_rollout(&ROLLOUT.replace(
+            r#""resets": [],"#,
+            r#""resets": [0, 1, 2],"#,
+        ))
+        .expect("rollout");
+        assert_eq!(every_step.resets.len(), 3);
+        assert!(every_step.collapsed(), "reset on every frame must read as collapsed");
     }
 
     #[test]
