@@ -3,12 +3,17 @@
 A native training studio for GPU reinforcement learning on humanoids, written in
 Rust on [makepad](https://github.com/makepad/makepad).
 
-The premise: [nexus](https://github.com/dimforge/nexus) renders physics on wgpu
-and makepad renders on the GPU, so the simulator and the console can be **one
-process on one device**. The viewport is then the simulation rather than a video
-of it — which is what makes single-stepping, perturbing a running policy and
-zero-latency scrubbing possible at all. Every other trainer in this space is a
-headless job plus a browser tab and cannot offer them at any price.
+The goal: put the simulator and the console in **one process**, so the viewport
+is the simulation rather than a video of it — which is what would make
+single-stepping, perturbing a running policy and zero-latency scrubbing possible
+at all. Every other trainer in this space is a headless job plus a browser tab
+and cannot offer them at any price.
+
+The original premise was stronger — one process *and one GPU device*, since
+[nexus](https://github.com/dimforge/nexus) renders physics on wgpu. That part is
+wrong on macOS, where makepad renders through Metal directly and does not depend
+on wgpu at all. The trainer running here is in-process on the CPU; see
+[why nexus and zealot are not linked](#why-nexus-and-zealot-are-not-linked).
 
 It is a sibling to [DoRobot Studio](https://github.com/dorobot-org/dorobot-studio),
 not a mode inside it. They share a visual language and two widget crates; they do
