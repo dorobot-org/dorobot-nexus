@@ -23,7 +23,11 @@ mod state;
 mod sweep;
 mod trainer;
 mod ux;
-#[cfg(feature = "zealot")]
+/// Always compiled — it is pure std and pulls in nothing. The `zealot` feature
+/// decides whether the app *prefers* this backend, not whether it exists; that
+/// keeps the state it owns out of `#[cfg]` on `App`'s fields, which the Script
+/// derive does not accept.
+#[allow(dead_code)]
 mod zealot;
 
 use screens::{
@@ -33,6 +37,9 @@ use screens::{
 };
 use state::Studio;
 use ux::Screen;
+// Imported bare, not written as `zealot::RolloutSlot` in the field: the Script
+// derive rejects a qualified path type with "Unexpected field form".
+use zealot::RolloutSlot;
 
 /// `--headless N` trains without a window and prints progress. The fastest way
 /// to answer "is it learning" without judging it through a UI.
@@ -94,6 +101,10 @@ fn headless(total: u64) -> ! {
 }
 
 app_main!(App);
+
+/// Playback tick, in seconds. 30 Hz: smooth enough for a gait, and cheap
+/// beside the metric poll.
+const ANIM_TICK: f32 = 0.033;
 
 /// `--sweep` runs the robustness sweep on the newest checkpoint and prints it.
 /// A surface you can only see in a GUI is a surface you cannot diff between
@@ -231,6 +242,15 @@ pub struct App {
     trainer: Option<trainer::Handle>,
     #[rust]
     poll: Timer,
+    /// Playback runs on its own interval. The metric poll is deliberately slow;
+    /// driving a 50 Hz rollout from it would play the gait at a tenth speed,
+    /// which reads as a broken policy rather than a slow clock.
+    #[rust]
+    anim: Timer,
+    /// Fractional frames carried between ticks, so playback runs at the
+    /// rollout's real rate instead of rounding to whole frames each tick.
+    #[rust]
+    anim_debt: f32,
     /// A checkpoint being driven in Inspect.
     #[rust]
     probe: Option<probe::Probe>,
@@ -238,9 +258,26 @@ pub struct App {
     surface: Option<std::sync::Arc<std::sync::Mutex<sweep::Surface>>>,
     #[rust]
     cross: Option<std::sync::Arc<std::sync::Mutex<crosssim::Report>>>,
+    /// A zealot rollout playing in the Scene view, filled on a worker thread:
+    /// rolling a checkpoint out runs a GPU simulation and takes seconds.
+    #[rust]
+    rollout: RolloutSlot,
+    #[rust]
+    rollout_frame: usize,
+    #[rust]
+    urdf_joints: Vec<String>,
 }
 
 impl App {
+    /// The checkpoint the zealot backend trains into, and therefore the one
+    /// the sweep and the sim-to-sim comparison roll out. Kept in one place so
+    /// the three screens cannot drift onto different files.
+    #[cfg(feature = "zealot")]
+    fn zealot_ckpt(&self) -> String {
+        std::env::var("DOROBOT_ZEALOT_CKPT")
+            .unwrap_or_else(|_| "dorobot_nexus.safetensors".to_string())
+    }
+
     /// Repaint every screen from the current snapshot.
     fn sync(&mut self, cx: &mut Cx) {
         let nav = self.ui.widget(cx, ids!(nav));
@@ -331,14 +368,54 @@ impl MatchEvent for App {
         if self.trainer.is_none() {
             self.trainer = Some(trainer::spawn(256, 4_000_000, 1));
         }
+
+        // Roll the checkpoint out once, off-thread, so the Scene view shows the
+        // policy walking rather than a mannequin. Absent stack or checkpoint
+        // simply leaves the model static.
+        #[cfg(feature = "zealot")]
+        {
+            self.urdf_joints = zealot::urdf_joint_names(
+                &std::path::PathBuf::from("data/g1/g1.urdf"),
+            );
+            let ckpt = self.zealot_ckpt();
+            if zealot::drive_path().is_file() && std::path::Path::new(&ckpt).is_file() {
+                let out = self.rollout.clone();
+                std::thread::spawn(move || {
+                    out.set(zealot::drive(&ckpt, zealot::Drive::default(), &[]));
+                    // stderr, not `log`: this is the one signal that says
+                    // whether the scene is showing a policy or a mannequin,
+                    // and it must not depend on how logging is configured.
+                    match out.len() {
+                        0 => eprintln!("scene: zealot rollout failed; robot stays static"),
+                        n => eprintln!("scene: zealot rollout loaded, {n} frames"),
+                    }
+                });
+            }
+        }
         self.poll = cx.start_interval(0.2);
+        self.anim = cx.start_interval(ANIM_TICK as f64);
         self.sync(cx);
     }
 
     fn handle_timer(&mut self, cx: &mut Cx, e: &TimerEvent) {
+        // Playback has its own clock, and runs whether or not the trainer has
+        // published anything yet.
+        #[cfg(feature = "zealot")]
+        if self.anim.is_timer(e).is_some() {
+            let dt = self.rollout.dt().max(1e-3);
+            self.anim_debt += ANIM_TICK / dt;
+            let step = self.anim_debt.floor();
+            self.anim_debt -= step;
+            self.rollout_frame = self.rollout_frame.wrapping_add(step as usize);
+            if let Some(pose) = self.rollout.pose(self.rollout_frame, &self.urdf_joints) {
+                self.ui.scene_screen(cx, ids!(page_scene)).set_pose(cx, &pose);
+            }
+        }
+
         if self.poll.is_timer(e).is_none() {
             return;
         }
+
         let Some(h) = &self.trainer else { return };
         let (samples, envs, total) = {
             let Ok(g) = h.shared.lock() else { return };
@@ -418,7 +495,15 @@ impl MatchEvent for App {
         }
 
         if self.ui.validate_screen(cx, ids!(page_validate)).clicked_run(cx, actions) {
-            match sweep::spawn(trainer::RUN_ID) {
+            // Prefer zealot's GPU biped when its stack is built; its sweep
+            // varies real PD gain and ground friction rather than a cart-pole's
+            // force and mass, and falls back rather than showing an empty grid.
+            #[cfg(feature = "zealot")]
+            let started = sweep::zealot_sweep::spawn(&self.zealot_ckpt());
+            #[cfg(not(feature = "zealot"))]
+            let started: Option<_> = None;
+
+            match started.or_else(|| sweep::spawn(trainer::RUN_ID)) {
                 Some(s) => self.surface = Some(s),
                 None => ::log::info!("sweep: no checkpoint to sweep yet"),
             }
@@ -426,7 +511,12 @@ impl MatchEvent for App {
         }
 
         if self.ui.validate_screen(cx, ids!(page_validate)).clicked_cross(cx, actions) {
-            match crosssim::spawn(trainer::RUN_ID) {
+            #[cfg(feature = "zealot")]
+            let started = crosssim::zealot_cross::spawn(&self.zealot_ckpt());
+            #[cfg(not(feature = "zealot"))]
+            let started: Option<_> = None;
+
+            match started.or_else(|| crosssim::spawn(trainer::RUN_ID)) {
                 Some(c) => self.cross = Some(c),
                 None => ::log::info!("cross-sim: no checkpoint yet"),
             }

@@ -160,6 +160,85 @@ pub fn spawn(run: &str) -> Option<Arc<Mutex<Report>>> {
     Some(report)
 }
 
+/// Sim-to-sim for zealot: the same policy under two physics-step resolutions.
+///
+/// zealot integrates several physics substeps per control tick, and
+/// `BIPED_DECIMATION` sets how many. Running one control decimation against
+/// another is the same test this module already makes against the cart-pole —
+/// a gait that only survives at one step size is exploiting the integrator,
+/// not solving the task. Like the built-in comparison it shares the dynamics,
+/// so it catches integration artefacts rather than modelling ones, and the UI
+/// says so instead of implying more.
+#[cfg(feature = "zealot")]
+pub mod zealot_cross {
+    use super::*;
+    use crate::zealot::{self, Drive};
+
+    const COMMAND_VX: f32 = 0.3;
+    const SECONDS: f32 = 3.0;
+    const FLOOR: f32 = 0.4;
+
+    /// Coarse against fine: zealot's default control decimation against one
+    /// physics step per control tick.
+    const COARSE: &str = "4";
+    const FINE: &str = "1";
+
+    fn evaluate(ckpt: &str, decimation: &str) -> Option<Score> {
+        let cmd = Drive { vx: COMMAND_VX, seconds: SECONDS, ..Drive::default() };
+        let knobs = [
+            ("BIPED_DECIMATION", decimation.to_string()),
+            ("BIPED_SPAWN_DR", "0".to_string()),
+        ];
+        let r = zealot::drive(ckpt, cmd, &knobs)?;
+        if r.is_empty() {
+            return None;
+        }
+        let fell = r.fell(FLOOR);
+        let achieved = r.achieved_vx();
+        Some(Score {
+            survival: if fell { 0.0 } else { 1.0 },
+            tracking: (1.0 - (achieved - COMMAND_VX).abs() / COMMAND_VX).clamp(0.0, 1.0),
+            // zealot's reward is not recoverable from a rollout; reporting the
+            // achieved velocity is the honest substitute and is what the two
+            // implementations are actually being compared on.
+            reward: achieved,
+            fall_rate: if fell { 1.0 } else { 0.0 },
+        })
+    }
+
+    pub fn spawn(ckpt: &str) -> Option<Arc<Mutex<Report>>> {
+        if !zealot::drive_path().is_file() {
+            return None;
+        }
+        let ckpt = ckpt.to_string();
+        let report = Arc::new(Mutex::new(Report {
+            running: true,
+            label: format!("zealot · decimation {COARSE} vs {FINE}"),
+            ..Default::default()
+        }));
+        let out = Arc::clone(&report);
+
+        thread::spawn(move || {
+            let a = evaluate(&ckpt, COARSE);
+            let b = evaluate(&ckpt, FINE);
+            if let Ok(mut r) = out.lock() {
+                match (a, b) {
+                    (Some(a), Some(b)) => {
+                        r.a = a;
+                        r.b = b;
+                        r.done = true;
+                    }
+                    // Half a comparison is not a comparison.
+                    _ => r.label = "rollout failed; nothing to compare".into(),
+                }
+                r.running = false;
+            }
+        });
+
+        Some(report)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

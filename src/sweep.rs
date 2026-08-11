@@ -49,6 +49,10 @@ pub struct Surface {
     pub total: usize,
     pub running: bool,
     pub label: String,
+    /// What the axes actually varied. Empty means the built-in cart-pole
+    /// sweep, whose axes the screen names itself; a zealot sweep varies
+    /// different physics and says so rather than borrowing those labels.
+    pub axes: String,
 }
 
 impl Surface {
@@ -88,6 +92,7 @@ pub fn spawn(run: &str) -> Option<Arc<Mutex<Surface>>> {
         total: ROWS * COLS,
         running: true,
         label: format!("step {}k", manifest.step / 1000),
+        ..Default::default()
     }));
 
     let out = Arc::clone(&surface);
@@ -159,6 +164,130 @@ pub fn spawn(run: &str) -> Option<Arc<Mutex<Surface>>> {
     });
 
     Some(surface)
+}
+
+/// The robustness sweep, run against zealot's GPU biped instead of the
+/// built-in cart-pole.
+///
+/// The axes are zealot's own `BIPED_*` knobs, so nothing in zealot is patched
+/// to make this work: each cell is one `biped_drive` rollout under a different
+/// physics, scored on whether the policy still tracked the commanded velocity.
+/// PD gain and ground friction are the two that decide whether a walking gait
+/// survives a real robot, which is what a sweep is for.
+///
+/// One GPU process per cell, run one at a time — the grid takes minutes, and
+/// progress is published per cell so it can be watched rather than waited on.
+#[cfg(feature = "zealot")]
+pub mod zealot_sweep {
+    use super::*;
+    use crate::zealot::{self, Drive};
+
+    pub const KP_RANGE: (f32, f32) = (0.4, 1.6);
+    pub const FRICTION_RANGE: (f32, f32) = (0.25, 1.25);
+
+    /// The command every cell is asked to hold. Well inside what the policy
+    /// trains on, so a failure is the physics, not an impossible request.
+    const COMMAND_VX: f32 = 0.3;
+    /// Long enough for a gait to fall apart if it is going to, short enough
+    /// that forty cells finish while you watch.
+    const SECONDS: f32 = 2.0;
+    /// Base height below which the rollout counts as a fall.
+    const FLOOR: f32 = 0.4;
+
+    pub fn axis_kp(col: usize) -> f32 {
+        let t = col as f32 / (COLS - 1) as f32;
+        KP_RANGE.0 + t * (KP_RANGE.1 - KP_RANGE.0)
+    }
+
+    pub fn axis_friction(row: usize) -> f32 {
+        let t = row as f32 / (ROWS - 1) as f32;
+        FRICTION_RANGE.0 + t * (FRICTION_RANGE.1 - FRICTION_RANGE.0)
+    }
+
+    /// How well a rollout held the command, 0..1. A fall scores zero however
+    /// well it tracked beforehand — falling over is not a partial success.
+    pub fn score(achieved: f32, fell: bool) -> f32 {
+        if fell {
+            return 0.0;
+        }
+        (1.0 - (achieved - COMMAND_VX).abs() / COMMAND_VX).clamp(0.0, 1.0)
+    }
+
+    /// `None` when the zealot stack is not built, so the caller can fall back
+    /// to the built-in sweep rather than showing an empty grid.
+    pub fn spawn(ckpt: &str) -> Option<Arc<Mutex<Surface>>> {
+        if !zealot::drive_path().is_file() {
+            return None;
+        }
+        let ckpt = ckpt.to_string();
+        let surface = Arc::new(Mutex::new(Surface {
+            cells: vec![-1.0; ROWS * COLS],
+            done: 0,
+            total: ROWS * COLS,
+            running: true,
+            label: "zealot · G1".into(),
+            axes: format!(
+                "PD gain {:.2}× → {:.2}×   ·   friction {:.2} → {:.2}",
+                KP_RANGE.0, KP_RANGE.1, FRICTION_RANGE.0, FRICTION_RANGE.1
+            ),
+        }));
+
+        let out = Arc::clone(&surface);
+        thread::spawn(move || {
+            for row in 0..ROWS {
+                for col in 0..COLS {
+                    let knobs = [
+                        ("BIPED_KP_SCALE", format!("{:.4}", axis_kp(col))),
+                        ("BIPED_FRICTION", format!("{:.4}", axis_friction(row))),
+                        // The sweep is the randomisation; leaving zealot's own
+                        // on top would blur what each cell measures.
+                        ("BIPED_SPAWN_DR", "0".to_string()),
+                    ];
+                    let cmd = Drive { vx: COMMAND_VX, seconds: SECONDS, ..Drive::default() };
+                    let cell = match zealot::drive(&ckpt, cmd, &knobs) {
+                        // A rollout that never produced a trajectory is not a
+                        // zero — it is an unmeasured cell, and the surface
+                        // distinguishes the two.
+                        Some(r) if !r.is_empty() => score(r.achieved_vx(), r.fell(FLOOR)),
+                        _ => -1.0,
+                    };
+                    if let Ok(mut s) = out.lock() {
+                        s.cells[row * COLS + col] = cell;
+                        s.done += 1;
+                    }
+                }
+            }
+            if let Ok(mut s) = out.lock() {
+                s.running = false;
+            }
+        });
+
+        Some(surface)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_axes_span_their_declared_ranges() {
+            assert!((axis_kp(0) - KP_RANGE.0).abs() < 1e-6);
+            assert!((axis_kp(COLS - 1) - KP_RANGE.1).abs() < 1e-6);
+            assert!((axis_friction(0) - FRICTION_RANGE.0).abs() < 1e-6);
+            assert!((axis_friction(ROWS - 1) - FRICTION_RANGE.1).abs() < 1e-6);
+        }
+
+        #[test]
+        fn tracking_the_command_scores_one_and_a_fall_scores_zero() {
+            assert!((score(COMMAND_VX, false) - 1.0).abs() < 1e-6);
+            assert_eq!(score(COMMAND_VX, true), 0.0);
+            // Standing still is a total miss of a 0.3 m/s command.
+            assert_eq!(score(0.0, false), 0.0);
+            // Overshooting is penalised the same as undershooting.
+            let (under, over) = (score(0.2, false), score(0.4, false));
+            assert!((under - over).abs() < 1e-6);
+        }
+    }
 }
 
 #[cfg(test)]

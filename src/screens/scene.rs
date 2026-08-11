@@ -209,6 +209,29 @@ impl SceneScreenRef {
         ux::head(cx, root, ids!(side.obs.obs_head), "CONTRACT", "99 → 29");
     }
 
+    /// Pose the robot from a rollout frame.
+    ///
+    /// `angles` is indexed by URDF joint order, which is what the viewer's
+    /// `set_joint_angles` expects; `zealot::Rollout::pose` builds it by name.
+    /// This is what turns the scene from a static model into the policy the
+    /// trainer just produced.
+    pub fn set_pose(&self, cx: &mut Cx, angles: &[f32]) {
+        let Some(mut inner) = self.borrow_mut() else { return };
+        // Nothing to pose until the URDF has finished loading.
+        if inner.loaded.is_none() || angles.is_empty() {
+            return;
+        }
+        let root = &mut inner.view;
+        let viewer = root.widget(cx, ids!(stage.viewport));
+        // The guard is bound to its own local so it is dropped before `viewer`.
+        // As the tail expression of this block it would outlive the value it
+        // borrows, which the borrow checker rejects.
+        let mut guard = viewer.borrow_mut::<makepad_urdf_player::robot_view::RobotView>();
+        if let Some(rv) = guard.as_mut() {
+            rv.set_joint_angles(cx, angles);
+        }
+    }
+
     /// True when "Add robot" was clicked.
     pub fn clicked_add(&self, cx: &mut Cx, actions: &Actions) -> bool {
         let Some(mut inner) = self.borrow_mut() else { return false };

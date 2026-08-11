@@ -6,6 +6,19 @@ use crate::crosssim::Report;
 use crate::sweep::{self, Surface};
 use crate::ux;
 
+/// What the two axes varied. A sweep that names someone else's axes is worse
+/// than one with no caption, so the surface carries its own when it has one.
+fn axis_label(s: &Surface) -> String {
+    if !s.axes.is_empty() {
+        return s.axes.clone();
+    }
+    format!(
+        "force {:.2} → {:.2}   ·   pole mass {:.1}× → {:.1}×",
+        sweep::FORCE_RANGE.0, sweep::FORCE_RANGE.1,
+        sweep::MASS_RANGE.0, sweep::MASS_RANGE.1
+    )
+}
+
 script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
@@ -322,19 +335,11 @@ impl ValidateScreenRef {
         let (head, axis) = match surface {
             Some(s) if s.running => (
                 format!("{}/{} cells · {}", s.done, s.total, s.label),
-                format!(
-                    "force {:.2} → {:.2}   ·   pole mass {:.1}× → {:.1}×",
-                    sweep::FORCE_RANGE.0, sweep::FORCE_RANGE.1,
-                    sweep::MASS_RANGE.0, sweep::MASS_RANGE.1
-                ),
+                axis_label(s),
             ),
             Some(s) if s.done > 0 => (
                 format!("{:.0}% of cells pass · {}", s.pass_fraction() * 100.0, s.label),
-                format!(
-                    "force {:.2} → {:.2}   ·   pole mass {:.1}× → {:.1}×",
-                    sweep::FORCE_RANGE.0, sweep::FORCE_RANGE.1,
-                    sweep::MASS_RANGE.0, sweep::MASS_RANGE.1
-                ),
+                axis_label(s),
             ),
             Some(s) => (s.label.clone(), String::new()),
             None => (
