@@ -12,6 +12,7 @@
 use makepad_widgets::*;
 
 mod ckpt;
+mod crosssim;
 mod env;
 mod plot;
 mod probe;
@@ -209,6 +210,8 @@ pub struct App {
     probe: Option<probe::Probe>,
     #[rust]
     surface: Option<std::sync::Arc<std::sync::Mutex<sweep::Surface>>>,
+    #[rust]
+    cross: Option<std::sync::Arc<std::sync::Mutex<crosssim::Report>>>,
 }
 
 impl App {
@@ -231,9 +234,11 @@ impl App {
         self.ui.train_screen(cx, ids!(page_train)).sync(cx, &run);
         self.ui.inspect_screen(cx, ids!(page_inspect)).sync(cx, self.probe.as_ref());
         let surf = self.surface.as_ref().and_then(|s| s.lock().ok());
+        let xsim = self.cross.as_ref().and_then(|c| c.lock().ok());
         self.ui
             .validate_screen(cx, ids!(page_validate))
-            .sync(cx, surf.as_deref());
+            .sync(cx, surf.as_deref(), xsim.as_deref());
+        drop(xsim);
         drop(surf);
 
         let live = self
@@ -370,6 +375,14 @@ impl MatchEvent for App {
             match sweep::spawn(trainer::RUN_ID) {
                 Some(s) => self.surface = Some(s),
                 None => ::log::info!("sweep: no checkpoint to sweep yet"),
+            }
+            dirty = true;
+        }
+
+        if self.ui.validate_screen(cx, ids!(page_validate)).clicked_cross(cx, actions) {
+            match crosssim::spawn(trainer::RUN_ID) {
+                Some(c) => self.cross = Some(c),
+                None => ::log::info!("cross-sim: no checkpoint yet"),
             }
             dirty = true;
         }

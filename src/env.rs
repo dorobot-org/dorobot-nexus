@@ -89,6 +89,20 @@ const MAX_STEPS: u32 = 400;
 /// and stood still. Measured with --track-check, not guessed.
 const X_LIMIT: f32 = 30.0;
 
+/// Cart and pole accelerations. Shared by both integrators so they are
+/// provably solving the same physics.
+fn accel(th: f32, dth: f32, dx: f32, force: f32, p: &Params) -> (f32, f32) {
+    let (sin, cos) = th.sin_cos();
+    let pole_m = POLE_M * p.mass_scale;
+    let total_m = CART_M + pole_m;
+    let pml = pole_m * POLE_L;
+    let temp = (force + pml * dth * dth * sin) / total_m;
+    let ddth =
+        (GRAVITY * sin - cos * temp) / (POLE_L * (4.0 / 3.0 - pole_m * cos * cos / total_m));
+    let ddx = temp - pml * ddth * cos / total_m - p.damping * dx;
+    (ddx, ddth)
+}
+
 #[derive(Clone, Copy)]
 struct State {
     x: f32,
@@ -110,11 +124,26 @@ impl Default for State {
     }
 }
 
+/// How the equations of motion are integrated.
+///
+/// The training environment uses semi-implicit Euler, which is what fast
+/// simulators use. `Rk4` solves the same dynamics with a fourth-order
+/// Runge-Kutta step instead — a different numerical implementation of the same
+/// physics. Running a policy in both is this project's analogue of zealot
+/// validating against MuJoCo: a gait that exploits one integrator's error will
+/// not survive the other, and finding that indoors is the entire point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Integrator {
+    Euler,
+    Rk4,
+}
+
 /// A population of independent environments stepped together.
 pub struct VecEnv {
     s: Vec<State>,
     rng: Rng,
     rand: Randomization,
+    integrator: Integrator,
 }
 
 /// What one step produced, per environment.
@@ -138,7 +167,11 @@ impl VecEnv {
         for st in s.iter_mut() {
             Self::reset_one(st, &mut rng, &rand);
         }
-        Self { s, rng, rand }
+        Self { s, rng, rand, integrator: Integrator::Euler }
+    }
+
+    pub fn set_integrator(&mut self, i: Integrator) {
+        self.integrator = i;
     }
 
     /// Pin every environment to one point in parameter space. What the sweep
@@ -191,24 +224,41 @@ impl VecEnv {
 
         for i in 0..n {
             let a = actions[i][0].clamp(-1.0, 1.0);
+            let integrator = self.integrator;
             let st = &mut self.s[i];
             let force = a * FORCE * st.p.force_scale;
 
-            // Standard cart-pole dynamics, semi-implicit Euler, with the
-            // episode's own mass and drag.
-            let (sin, cos) = st.th.sin_cos();
-            let pole_m = POLE_M * st.p.mass_scale;
-            let total_m = CART_M + pole_m;
-            let pml = pole_m * POLE_L;
-            let temp = (force + pml * st.dth * st.dth * sin) / total_m;
-            let ddth = (GRAVITY * sin - cos * temp)
-                / (POLE_L * (4.0 / 3.0 - pole_m * cos * cos / total_m));
-            let ddx = temp - pml * ddth * cos / total_m - st.p.damping * st.dx;
-
-            st.dx += DT * ddx;
-            st.x += DT * st.dx;
-            st.dth += DT * ddth;
-            st.th += DT * st.dth;
+            match integrator {
+                Integrator::Euler => {
+                    let (ddx, ddth) = accel(st.th, st.dth, st.dx, force, &st.p);
+                    st.dx += DT * ddx;
+                    st.x += DT * st.dx;
+                    st.dth += DT * ddth;
+                    st.th += DT * st.dth;
+                }
+                Integrator::Rk4 => {
+                    // y = [x, dx, th, dth]
+                    let y = [st.x, st.dx, st.th, st.dth];
+                    let f = |y: [f32; 4]| -> [f32; 4] {
+                        let (ddx, ddth) = accel(y[2], y[3], y[1], force, &st.p);
+                        [y[1], ddx, y[3], ddth]
+                    };
+                    let add = |y: [f32; 4], k: [f32; 4], h: f32| {
+                        [y[0] + h * k[0], y[1] + h * k[1], y[2] + h * k[2], y[3] + h * k[3]]
+                    };
+                    let k1 = f(y);
+                    let k2 = f(add(y, k1, DT * 0.5));
+                    let k3 = f(add(y, k2, DT * 0.5));
+                    let k4 = f(add(y, k3, DT));
+                    for (j, slot) in [&mut st.x, &mut st.dx, &mut st.th, &mut st.dth]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        *slot = y[j]
+                            + DT / 6.0 * (k1[j] + 2.0 * k2[j] + 2.0 * k3[j] + k4[j]);
+                    }
+                }
+            }
             st.steps += 1;
 
             // The same decomposition the Task screen shows.
@@ -345,6 +395,30 @@ mod tests {
             drag.step(&vec![vec![0.0]]);
         }
         assert!(drag.s[0].dx.abs() < free.s[0].dx.abs(), "damping did nothing");
+    }
+
+    #[test]
+    fn the_two_integrators_agree_closely_but_not_exactly() {
+        // Same physics, different numerics: they must track each other over a
+        // short horizon, and must not be bit-identical — otherwise one of them
+        // is not doing what it claims.
+        let mut a = VecEnv::new(1, 21);
+        let mut b = VecEnv::new(1, 21);
+        b.set_integrator(Integrator::Rk4);
+        for e in [&mut a, &mut b] {
+            e.s[0].th = 0.10;
+            e.s[0].dth = 0.0;
+            e.s[0].dx = 0.0;
+            e.s[0].x = 0.0;
+        }
+        for _ in 0..25 {
+            a.step(&vec![vec![0.2]]);
+            b.step(&vec![vec![0.2]]);
+        }
+        let (_, ta) = a.pose(0);
+        let (_, tb) = b.pose(0);
+        assert!((ta - tb).abs() < 0.05, "integrators diverged wildly: {ta} vs {tb}");
+        assert!((ta - tb).abs() > 1e-7, "integrators are identical; rk4 is not running");
     }
 
     #[test]

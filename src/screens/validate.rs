@@ -2,6 +2,7 @@
 
 use makepad_widgets::*;
 
+use crate::crosssim::Report;
 use crate::sweep::{self, Surface};
 use crate::ux;
 
@@ -204,10 +205,44 @@ script_mod! {
                     padding: Inset{left: 14. right: 14. top: 12. bottom: 14.}
                     note := Label{
                         width: Fill
-                        text: "A policy is only checked against the engine it was trained in until it is checked against another one. MuJoCo is the reference."
+                        text: ""
                         draw_text +: {
                             text_style: mod.widgets.ux.TEXT_BODY{}
                             get_color: fn() { return #x98A1B8 }
+                        }
+                    }
+                    gap := Label{
+                        text: ""
+                        margin: Inset{top: 10.}
+                        draw_text +: {
+                            text_style: mod.widgets.ux.TEXT_H1{}
+                            get_color: fn() { return #xE7EAF3 }
+                        }
+                    }
+                    gap_cap := Label{
+                        text: ""
+                        draw_text +: {
+                            text_style: mod.widgets.ux.TEXT_CHIP{}
+                            get_color: fn() { return #x6C7591 }
+                        }
+                    }
+                    cross_btn := RoundedView{
+                        width: Fit height: Fit
+                        margin: Inset{top: 14.}
+                        padding: Inset{left: 12. right: 12. top: 6. bottom: 7.}
+                        cursor: MouseCursor.Hand
+                        draw_bg +: {
+                            color: #x2A2350
+                            border_color: #xA28BEA
+                            border_size: 1.0
+                            border_radius: 5.0
+                        }
+                        cross_lbl := Label{
+                            text: "Run cross-sim"
+                            draw_text +: {
+                                text_style: mod.widgets.ux.TEXT_CHIP{}
+                                get_color: fn() { return #xBCA9F5 }
+                            }
                         }
                     }
                     mod.widgets.ux.Filler{}
@@ -221,7 +256,9 @@ script_mod! {
                 cmp_body := View{
                     width: Fill height: Fit flow: Down
                     padding: Inset{top: 6. bottom: 10.}
-                    hdr := CmpRow{ k +: {text: "metric"} a +: {text: "nexus"} b +: {text: "mujoco"} d +: {text: "Δ"} }
+                    // Named for what is actually compared. "mujoco" here would be a
+                    // label for a simulator this build does not have.
+                    hdr := CmpRow{ k +: {text: "metric"} a +: {text: "euler"} b +: {text: "rk4"} d +: {text: "Δ"} }
                     v0 := CmpRow{}
                     v1 := CmpRow{}
                     v2 := CmpRow{}
@@ -264,7 +301,7 @@ const CELLS: [[&[LiveId]; COLS]; 5] = [
 ];
 
 impl ValidateScreenRef {
-    pub fn sync(&self, cx: &mut Cx, surface: Option<&Surface>) {
+    pub fn sync(&self, cx: &mut Cx, surface: Option<&Surface>, cross: Option<&Report>) {
         let Some(mut inner) = self.borrow_mut() else { return };
         inner.built = true;
         let root = &mut inner.view;
@@ -308,28 +345,71 @@ impl ValidateScreenRef {
         ux::head(cx, root, ids!(rob.rob_head), "ROBUSTNESS", &head);
         root.label(cx, ids!(rob.rob_body.axis)).set_text(cx, &axis);
 
-        // The comparison table has no second simulator behind it yet, so it
-        // says so rather than printing numbers nothing produced.
-        for (path, k, a, b, d) in [
-            (ids!(side.cmp.cmp_body.v0) as &[LiveId], "success rate", "—", "—", "—"),
-            (ids!(side.cmp.cmp_body.v1), "mean reward", "—", "—", "—"),
-            (ids!(side.cmp.cmp_body.v2), "tracking rmse", "—", "—", "—"),
-            (ids!(side.cmp.cmp_body.v3), "fall rate", "—", "—", "—"),
-        ] {
-            let row = root.widget(cx, path);
-            row.label(cx, ids!(k)).set_text(cx, k);
-            row.label(cx, ids!(a)).set_text(cx, a);
-            row.label(cx, ids!(b)).set_text(cx, b);
-            row.label(cx, ids!(d)).set_text(cx, d);
+        // The comparison table, from the cross-simulator run.
+        let paths: [&[LiveId]; 4] = [
+            ids!(side.cmp.cmp_body.v0),
+            ids!(side.cmp.cmp_body.v1),
+            ids!(side.cmp.cmp_body.v2),
+            ids!(side.cmp.cmp_body.v3),
+        ];
+        match cross.filter(|r| r.done) {
+            Some(r) => {
+                for (path, (k, a, b, d)) in paths.iter().zip(r.rows()) {
+                    let row = root.widget(cx, path);
+                    row.label(cx, ids!(k)).set_text(cx, k);
+                    row.label(cx, ids!(a)).set_text(cx, &a);
+                    row.label(cx, ids!(b)).set_text(cx, &b);
+                    row.label(cx, ids!(d)).set_text(cx, &d);
+                }
+                let gap = r.worst_gap();
+                root.label(cx, ids!(side.cross.cross_body.gap))
+                    .set_text(cx, &format!("{:.1}% worst gap", gap * 100.0));
+                root.label(cx, ids!(side.cross.cross_body.gap_cap)).set_text(
+                    cx,
+                    if gap < 0.05 {
+                        "agrees — no integration artifact found"
+                    } else {
+                        "disagrees — the policy depends on how it was integrated"
+                    },
+                );
+                ux::head(cx, root, ids!(side.cmp.cmp_head), "COMPARISON", "euler vs rk4");
+                ux::head(cx, root, ids!(side.cross.cross_head), "CROSS-SIM", &r.label);
+            }
+            None => {
+                for path in paths {
+                    let row = root.widget(cx, path);
+                    for id in [ids!(a) as &[LiveId], ids!(b), ids!(d)] {
+                        row.label(cx, id).set_text(cx, "—");
+                    }
+                }
+                root.label(cx, ids!(side.cross.cross_body.gap)).set_text(cx, "");
+                root.label(cx, ids!(side.cross.cross_body.gap_cap)).set_text(cx, "");
+                let running = cross.map(|r| r.running).unwrap_or(false);
+                ux::head(cx, root, ids!(side.cmp.cmp_head), "COMPARISON", "euler vs rk4");
+                ux::head(cx, root, ids!(side.cross.cross_head), "CROSS-SIM",
+                         if running { "running" } else { "not run" });
+            }
         }
-        ux::head(cx, root, ids!(side.cmp.cmp_head), "COMPARISON", "no second simulator");
-        ux::head(cx, root, ids!(side.cross.cross_head), "CROSS-SIM", "not built");
+        // Said plainly, because it bounds what this check can catch.
+        root.label(cx, ids!(side.cross.cross_body.note)).set_text(
+            cx,
+            "The reference is an RK4 step against the same equations of motion. \
+             It catches a policy that depends on integration error; it shares the \
+             dynamics, so it cannot catch a modelling error.",
+        );
     }
 
     /// True when "Run sweep" was pressed.
     pub fn clicked_run(&self, cx: &mut Cx, actions: &Actions) -> bool {
         let Some(mut inner) = self.borrow_mut() else { return false };
         let b = inner.view.widget(cx, ids!(rob.rob_body.keys.run_btn));
+        !b.is_empty() && ux::view_clicked(actions, b.widget_uid())
+    }
+
+    /// True when "Run cross-sim" was pressed.
+    pub fn clicked_cross(&self, cx: &mut Cx, actions: &Actions) -> bool {
+        let Some(mut inner) = self.borrow_mut() else { return false };
+        let b = inner.view.widget(cx, ids!(side.cross.cross_body.cross_btn));
         !b.is_empty() && ux::view_clicked(actions, b.widget_uid())
     }
 }

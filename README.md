@@ -77,11 +77,19 @@ the training distribution — twelve episodes per cell, and scores each cell by
 how well the policy did the task there. It runs on its own thread and fills in
 live. `--sweep` prints the same surface as text, so two policies can be diffed.
 
+**Cross-simulator validation is real.** The same policy runs against two
+numerical implementations of the same equations — the semi-implicit Euler step
+training uses, and a fourth-order Runge-Kutta reference — with identical seeds
+and command spreads, and the panel reports the worst relative gap. It is a
+weaker check than zealot's MuJoCo comparison and the UI says so: sharing the
+dynamics function, it catches a policy that depends on integration error but
+cannot catch a modelling error. The table is labelled `euler` / `rk4` rather
+than borrowing a simulator's name this build does not have.
+
 **Not real:** no GPU physics — see below. No robot import; that control logs
 that it is unbuilt rather than pretending. Scene's randomization sliders display
-the distribution but cannot yet edit it. The cross-simulator panel has no second
-simulator behind it and says so instead of printing numbers. Runs 2 and 3 are
-fixtures, and the screen says so.
+the distribution but cannot yet edit it. Runs 2 and 3 are fixtures, and the
+screen says so.
 
 ## What the sweep found
 
