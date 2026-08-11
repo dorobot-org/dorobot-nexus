@@ -1,0 +1,22 @@
+[package]
+name = "dorobot-nexus"
+version = "0.1.0"
+edition = "2021"
+description = "Native training studio for GPU reinforcement learning on humanoids"
+
+[[bin]]
+name = "dorobot-nexus"
+path = "src/main.rs"
+
+[dependencies]
+makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev" }
+# The panel shell and the URDF viewer are shared with DoRobot Studio. Nothing
+# else is: the two products meet at an artifact boundary, not a code boundary,
+# so the dataset and video machinery stays out of this tree.
+makepad-app-shell = { git = "https://github.com/mofa-org/makepad-flex-layout", rev = "78425b1" }
+makepad-urdf-player = { git = "https://github.com/dorobot-org/makepad-urdf-viewer", rev = "ab713d2" }
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = 3
