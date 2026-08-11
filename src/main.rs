@@ -11,8 +11,10 @@
 
 use makepad_widgets::*;
 
+mod ckpt;
 mod env;
 mod plot;
+mod probe;
 mod screens;
 mod rl;
 mod rng;
@@ -123,6 +125,9 @@ pub struct App {
     trainer: Option<trainer::Handle>,
     #[rust]
     poll: Timer,
+    /// A checkpoint being driven in Inspect.
+    #[rust]
+    probe: Option<probe::Probe>,
 }
 
 impl App {
@@ -143,7 +148,7 @@ impl App {
         self.ui.scene_screen(cx, ids!(page_scene)).sync(cx, &robot);
         self.ui.task_screen(cx, ids!(page_task)).sync(cx, &run);
         self.ui.train_screen(cx, ids!(page_train)).sync(cx, &run);
-        self.ui.inspect_screen(cx, ids!(page_inspect)).sync(cx, &robot, &ckpt);
+        self.ui.inspect_screen(cx, ids!(page_inspect)).sync(cx, self.probe.as_ref());
         self.ui.validate_screen(cx, ids!(page_validate)).sync(cx);
 
         let live = self
@@ -209,6 +214,14 @@ impl MatchEvent for App {
         // Same Run shape as the fixtures, so every screen and the diagnosis
         // catalogue work on live data without knowing the difference.
         self.app.runs[0] = state::live_run(&samples, envs, total, 1);
+
+        // Pick up the first checkpoint the trainer writes, then play it.
+        if self.probe.is_none() {
+            self.probe = probe::Probe::load_latest(trainer::RUN_ID);
+        }
+        if let Some(p) = self.probe.as_mut() {
+            p.tick();
+        }
         self.sync(cx);
         self.ui.redraw(cx);
     }
@@ -233,6 +246,38 @@ impl MatchEvent for App {
             self.app.selected = i;
             self.app.screen = Screen::Train;
             dirty = true;
+        }
+
+        // Inspect's transport. Because the simulation is in this process, each
+        // of these is a function call rather than a script and a re-run.
+        if let Some(t) = self
+            .ui
+            .inspect_screen(cx, ids!(page_inspect))
+            .transport(cx, actions)
+        {
+            if self.probe.is_none() {
+                self.probe = probe::Probe::load_latest(trainer::RUN_ID);
+            }
+            if let Some(p) = self.probe.as_mut() {
+                use screens::inspect::Transport as T;
+                match t {
+                    T::Play => p.toggle_play(),
+                    T::StepBack => p.step_by(-1),
+                    T::StepForward => p.step_by(1),
+                    // Restart also pulls in any newer checkpoint, so a probe
+                    // left open while training continues is not stuck on the
+                    // policy it happened to load first.
+                    T::Restart => {
+                        match probe::Probe::load_latest(trainer::RUN_ID) {
+                            Some(fresh) => *p = fresh,
+                            None => p.restart(),
+                        }
+                    }
+                    T::Push => p.push(1.6),
+                    T::Seek(f) => p.seek_fraction(f),
+                }
+                dirty = true;
+            }
         }
 
         if self.ui.scene_screen(cx, ids!(page_scene)).clicked_add(cx, actions) {

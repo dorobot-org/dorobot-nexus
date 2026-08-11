@@ -328,6 +328,60 @@ impl Ppo {
     }
 }
 
+impl Mlp {
+    fn params(&self) -> impl Iterator<Item = &Linear> {
+        [&self.l0, &self.l1, &self.l2].into_iter()
+    }
+    fn params_mut(&mut self) -> impl Iterator<Item = &mut Linear> {
+        [&mut self.l0, &mut self.l1, &mut self.l2].into_iter()
+    }
+}
+
+impl Ppo {
+    /// Weights as one flat vector: actor, critic, then log_std.
+    pub fn to_weights(&self) -> Vec<f32> {
+        let mut out = Vec::new();
+        for net in [&self.actor, &self.critic] {
+            for l in net.params() {
+                out.extend_from_slice(&l.w);
+                out.extend_from_slice(&l.b);
+            }
+        }
+        out.extend_from_slice(&self.log_std);
+        out
+    }
+
+    /// Restore weights written by [`Ppo::to_weights`] into a net of the same
+    /// shape. Returns false when the length disagrees, which is the only check
+    /// worth making: a shape mismatch means the manifest and the blob disagree.
+    pub fn load_weights(&mut self, w: &[f32]) -> bool {
+        if w.len() != self.to_weights().len() {
+            return false;
+        }
+        let mut i = 0;
+        for net in [&mut self.actor, &mut self.critic] {
+            for l in net.params_mut() {
+                let nw = l.w.len();
+                l.w.copy_from_slice(&w[i..i + nw]);
+                i += nw;
+                let nb = l.b.len();
+                l.b.copy_from_slice(&w[i..i + nb]);
+                i += nb;
+            }
+        }
+        let n = self.log_std.len();
+        self.log_std.copy_from_slice(&w[i..i + n]);
+        true
+    }
+
+    /// The mean action, with no exploration noise. What Inspect drives with:
+    /// probing a policy should show the policy, not a sample from it.
+    pub fn act_mean(&mut self, obs: &[f32], action: &mut [f32]) {
+        let mean = self.actor.forward(obs);
+        action[..mean.len()].copy_from_slice(mean);
+    }
+}
+
 /// A flattened rollout, ready for the update.
 #[derive(Default)]
 pub struct Batch {
@@ -363,6 +417,29 @@ pub fn gae(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weights_round_trip_through_a_flat_vector() {
+        let mut rng = Rng::new(11);
+        let mut a = Ppo::new(5, 1, 16, Config::default(), &mut rng);
+        let mut b = Ppo::new(5, 1, 16, Config::default(), &mut rng);
+        let w = a.to_weights();
+        assert!(b.load_weights(&w));
+        // Same weights must give the same deterministic action.
+        let obs = [0.1_f32, -0.2, 0.3, 0.0, 0.5];
+        let mut xa = [0.0];
+        let mut xb = [0.0];
+        a.act_mean(&obs, &mut xa);
+        b.act_mean(&obs, &mut xb);
+        assert!((xa[0] - xb[0]).abs() < 1e-9, "{} vs {}", xa[0], xb[0]);
+    }
+
+    #[test]
+    fn a_wrong_length_blob_is_refused() {
+        let mut rng = Rng::new(2);
+        let mut p = Ppo::new(5, 1, 16, Config::default(), &mut rng);
+        assert!(!p.load_weights(&[0.0; 3]));
+    }
 
     #[test]
     fn gae_with_no_discount_is_a_reward_to_go_residual() {

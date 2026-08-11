@@ -6,7 +6,6 @@
 
 use makepad_widgets::*;
 
-use crate::state::Robot;
 use crate::ux;
 
 script_mod! {
@@ -105,7 +104,55 @@ script_mod! {
                 width: Fill height: Fill
                 flow: Down
                 stage_head := mod.widgets.ux.PanelHead{ title +: {text: "ROLLOUT"} }
-                viewport := RobotView{ width: Fill height: Fill }
+                // The cart-pole, because that is what the policy drives. A G1
+                // here would be decoration: nothing simulates it.
+                viewport := View{
+                    width: Fill height: Fill
+                    show_bg: true
+                    draw_bg +: {
+                        cart_x: instance(0.0)
+                        angle: instance(0.0)
+                        push: instance(0.0)
+                        pixel: fn() {
+                            let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                            let w = self.rect_size.x
+                            let h = self.rect_size.y
+                            // clear() paints the whole field; a zero-radius box
+                            // was drawing nothing.
+                            let sky = mix(#xFBF3F4, #xEFE6CE, self.pos.y)
+                            sdf.clear(sky)
+
+                            let ground = h * 0.72
+                            sdf.box(0.0, ground, w, 1.5, 0.0)
+                            sdf.fill(#xC8BFA6)
+
+                            // The rail spans +/-3 units, the env's own bound.
+                            let cx = w * 0.5 + self.cart_x * (w / 6.0)
+                            let cw = w * 0.055
+                            let ch = h * 0.045
+                            sdf.box(cx - cw * 0.5, ground - ch, cw, ch, 3.0)
+                            sdf.fill(#x3B4152)
+
+                            // Pole, leaning by the recorded angle.
+                            let len = h * 0.30
+                            let tipx = cx + sin(self.angle) * len
+                            let tipy = ground - ch - cos(self.angle) * len
+                            sdf.move_to(cx, ground - ch)
+                            sdf.line_to(tipx, tipy)
+                            sdf.stroke(#x4A5164, 5.0)
+                            sdf.circle(tipx, tipy, 7.0)
+                            sdf.fill(#x8A6ED8)
+
+                            // The push, drawn while it is being applied.
+                            let ax = cx + 46.0 * sign(self.push)
+                            let arrow = (1.0 - step(0.01, abs(self.push)))
+                            sdf.move_to(ax, ground - ch * 2.0)
+                            sdf.line_to(cx + 12.0 * sign(self.push), ground - ch * 2.0)
+                            sdf.stroke(mix(#xA28BEA00, #xA28BEA, 1.0 - arrow), 3.0)
+                            return sdf.result
+                        }
+                    }
+                }
             }
 
             transport := mod.widgets.ux.Card{
@@ -132,6 +179,7 @@ script_mod! {
                     }
                     scrub := View{
                         width: Fill height: 22
+                        cursor: MouseCursor.Hand
                         show_bg: true
                         draw_bg +: {
                             head: instance(0.35)
@@ -225,35 +273,115 @@ const OBS_ROWS: [&[LiveId]; 8] = [
     ids!(side.obs.obs_body.ob6), ids!(side.obs.obs_body.ob7),
 ];
 
+/// What the transport reported this frame.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Transport {
+    Play,
+    StepBack,
+    StepForward,
+    Restart,
+    Push,
+    Seek(f64),
+}
+
 impl InspectScreenRef {
-    pub fn sync(&self, cx: &mut Cx, robot: &Robot, checkpoint: &str) {
+    pub fn sync(&self, cx: &mut Cx, probe: Option<&crate::probe::Probe>) {
         let Some(mut inner) = self.borrow_mut() else { return };
-        let need_load = inner.loaded.as_deref() != Some(robot.urdf.as_path());
-        if need_load {
-            inner.loaded = Some(robot.urdf.clone());
-        }
         let root = &mut inner.view;
 
-        let viewer = root.widget(cx, ids!(main.stage.viewport));
-        if need_load {
-            if let Some(mut rv) = viewer.borrow_mut::<makepad_urdf_player::robot_view::RobotView>() {
-                if let Err(e) = rv.load_robot(
-                    &robot.urdf.to_string_lossy(),
-                    &robot.assets.to_string_lossy(),
-                ) {
-                    ::log::error!("inspect: {} failed to load: {e}", robot.urdf.display());
+        let Some(p) = probe else {
+            ux::head(cx, root, ids!(main.stage.stage_head), "ROLLOUT", "no checkpoint yet");
+            root.label(cx, ids!(main.transport.t_body.controls.frame_lbl))
+                .set_text(cx, "— / —");
+            return;
+        };
+
+        let f = p.frame();
+        let mut view = root.widget(cx, ids!(main.stage.viewport));
+        let push_vis = if p.last_push == Some(p.cursor) { 1.0 } else { 0.0 };
+        script_apply_eval!(cx, view, {
+            draw_bg +: { cart_x: #(f.cart_x as f64) angle: #(f.angle as f64) push: #(push_vis) }
+        });
+
+        ux::head(cx, root, ids!(main.stage.stage_head), "ROLLOUT", &p.label);
+        root.label(cx, ids!(main.transport.t_body.controls.frame_lbl))
+            .set_text(cx, &format!("{} / {}", p.cursor, p.frames.len().saturating_sub(1)));
+
+        let mut scrub = root.widget(cx, ids!(main.transport.t_body.scrub));
+        let head = p.progress();
+        script_apply_eval!(cx, scrub, { draw_bg +: { head: #(head) } });
+
+        let play = root.widget(cx, ids!(main.transport.t_body.controls.b_play));
+        play.label(cx, ids!(cap)).set_text(cx, if p.playing { "||" } else { ">" });
+
+        // The observation the policy actually consumed on this tick.
+        let rows: [(&str, String); 8] = [
+            ("cart_x", format!("{:+.3}", f.cart_x)),
+            ("pole_angle", format!("{:+.3}", f.angle)),
+            ("action", format!("{:+.3}", f.action)),
+            ("reward", format!("{:+.3}", f.reward)),
+            ("frame", format!("{}", p.cursor)),
+            ("frames", format!("{}", p.frames.len())),
+            ("terminated", if f.fell { "fell".into() } else { "no".into() }),
+            ("policy", "mean, no noise".into()),
+        ];
+        for (i, path) in OBS_ROWS.iter().enumerate() {
+            let row = root.widget(cx, path);
+            row.label(cx, ids!(k)).set_text(cx, rows[i].0);
+            row.label(cx, ids!(v)).set_text(cx, &rows[i].1);
+        }
+        ux::head(cx, root, ids!(side.obs.obs_head), "STATE", "live");
+
+        // Effort, from the action the policy chose.
+        let effort = f.action.abs() as f64;
+        for (i, path) in [
+            ids!(side.torque.tq_body.m0) as &[LiveId],
+            ids!(side.torque.tq_body.m1),
+            ids!(side.torque.tq_body.m2),
+            ids!(side.torque.tq_body.m3),
+            ids!(side.torque.tq_body.m4),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let row = root.widget(cx, path);
+            row.label(cx, ids!(k)).set_text(cx, if i == 0 { "cart_force" } else { "—" });
+            // Not named `v`: script_apply_eval! has a local by that name.
+            let level = if i == 0 { effort } else { 0.0 };
+            let mut bar = row.widget(cx, ids!(bar));
+            script_apply_eval!(cx, bar, { draw_bg +: { v: #(level) } });
+        }
+        ux::head(cx, root, ids!(side.torque.tq_head), "EFFORT", "1 actuator");
+    }
+
+    /// What the operator pressed, if anything.
+    pub fn transport(&self, cx: &mut Cx, actions: &Actions) -> Option<Transport> {
+        let mut inner = self.borrow_mut()?;
+        let v = &mut inner.view;
+        for (path, out) in [
+            (ids!(main.transport.t_body.controls.b_play) as &[LiveId], Transport::Play),
+            (ids!(main.transport.t_body.controls.b_step_b), Transport::StepBack),
+            (ids!(main.transport.t_body.controls.b_step_f), Transport::StepForward),
+            (ids!(main.transport.t_body.controls.b_start), Transport::Restart),
+            (ids!(main.transport.t_body.controls.b_push), Transport::Push),
+        ] {
+            let b = v.widget(cx, path);
+            if !b.is_empty() && ux::view_clicked(actions, b.widget_uid()) {
+                return Some(out);
+            }
+        }
+        // Clicking the scrubber seeks to that fraction of the rollout.
+        let scrub = v.widget(cx, ids!(main.transport.t_body.scrub));
+        if !scrub.is_empty() {
+            let rect = scrub.area().rect(cx);
+            for a in actions.filter_widget_actions(scrub.widget_uid()) {
+                if let ViewAction::FingerUp(fe) = a.cast::<ViewAction>() {
+                    if fe.is_over && rect.size.x > 1.0 {
+                        return Some(Transport::Seek((fe.abs.x - rect.pos.x) / rect.size.x));
+                    }
                 }
             }
         }
-
-        ux::head(cx, root, ids!(main.stage.stage_head), "ROLLOUT", checkpoint);
-        root.label(cx, ids!(main.transport.t_body.controls.frame_lbl))
-            .set_text(cx, "— / —");
-        for (i, path) in OBS_ROWS.iter().enumerate() {
-            let row = root.widget(cx, path);
-            row.label(cx, ids!(k)).set_text(cx, OBS[i].0);
-            row.label(cx, ids!(v)).set_text(cx, OBS[i].1);
-        }
-        ux::head(cx, root, ids!(side.obs.obs_head), "OBSERVATION", "99 ch");
+        None
     }
 }

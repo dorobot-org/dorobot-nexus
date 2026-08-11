@@ -52,9 +52,27 @@ trainer on its own thread publishing snapshots over a channel (`src/trainer.rs`)
 the Unitree G1 at 29 DOF rendered from its real URDF; the diagnosis catalogue;
 and a multi-series plot widget. 12 tests.
 
+**Checkpoints are written and reloadable.** The trainer writes weights every
+250k env-steps beside a manifest carrying run, scene, seed, step, score, network
+shape and the reward terms with their weights — so a blob on disk is always
+traceable to what produced it.
+
+**Inspect drives them.** It loads the newest checkpoint, runs the policy
+deterministically (its mean action, so stepping back and forth shows the same
+trajectory twice), and gives you play, pause, single-step, scrub, restart and
+**push**. The push is the one a headless trainer cannot offer: it applies an
+impulse, discards the future it invalidated, and re-simulates from there. On a
+trained policy you watch it recover — pole knocked to -0.15 rad, the policy
+answering at 0.88 of full effort, reward dropping and climbing back.
+
+Restart also pulls in any newer checkpoint, so a probe left open while training
+continues does not stay stuck on the policy it first loaded.
+
 **Not real:** no GPU physics — see below. No robot import; that control logs
-that it is unbuilt rather than pretending. Checkpoints are scored but not
-written to disk. Runs 2 and 3 in the list are fixtures, and the screen says so.
+that it is unbuilt rather than pretending. Scene's randomization sliders are not
+connected to the environment, which has none. Validate's robustness surface is a
+closed-form shape, not a sweep. Runs 2 and 3 are fixtures, and the screen says
+so.
 
 ## Why nexus and zealot are not linked
 

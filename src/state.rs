@@ -61,7 +61,11 @@ pub struct Checkpoint {
 
 impl Checkpoint {
     pub fn name(&self) -> String {
-        format!("ckpt-{:03}M", self.step / 1_000_000)
+        if self.step >= 1_000_000 {
+            format!("ckpt-{:03}M", self.step / 1_000_000)
+        } else {
+            format!("ckpt-{:04}k", self.step / 1000)
+        }
     }
 }
 
@@ -267,13 +271,13 @@ pub fn live_run(samples: &[Sample], envs: u32, total_steps: u64, seed: u64) -> R
         terms,
         fall_rate: samples.iter().map(|s| s.fall_rate as f64).collect(),
         throughput: samples.iter().map(|s| s.steps_per_sec / 1000.0).collect(),
-        // Checkpoints are not written yet; the best interval stands in for the
-        // score so the rail is not empty and does not invent a filename.
-        checkpoints: if samples.is_empty() {
-            Vec::new()
-        } else {
-            vec![Checkpoint { step: steps, score: best }]
-        },
+        // Read from disk, so the rail lists artifacts that exist rather than
+        // intervals that happened.
+        checkpoints: crate::ckpt::list(crate::trainer::RUN_ID)
+            .into_iter()
+            .take(6)
+            .map(|(_, m)| Checkpoint { step: m.step, score: m.score })
+            .collect(),
         leans: last.map(|s| s.leans.clone()).unwrap_or_default(),
     }
 }

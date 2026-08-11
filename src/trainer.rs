@@ -10,7 +10,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-use crate::env::{VecEnv, N_ACT, N_OBS, TERM_NAMES};
+use crate::ckpt;
+use crate::env::{VecEnv, N_ACT, N_OBS, TERM_NAMES, TERM_WEIGHTS};
 use crate::rl::{gae, Batch, Config, Ppo};
 use crate::rng::Rng;
 
@@ -67,6 +68,11 @@ pub fn spawn(envs: usize, total_steps: u64, seed: u64) -> Handle {
 }
 
 const HORIZON: usize = 32;
+/// Write a checkpoint every this many env-steps. Frequent enough that a run you
+/// kill at minute ten still leaves something promotable behind.
+const CKPT_EVERY: u64 = 250_000;
+
+pub const RUN_ID: &str = "balance-track-01";
 
 fn run(
     n_envs: usize,
@@ -85,6 +91,8 @@ fn run(
     }
 
     let mut env_steps: u64 = 0;
+    let mut next_ckpt: u64 = CKPT_EVERY;
+    let mut best = f32::MIN;
     let started = Instant::now();
     let mut ep_return = vec![0.0_f32; n_envs];
     let mut ep_len = vec![0u32; n_envs];
@@ -190,6 +198,33 @@ fn run(
             episode_len: if ends > 0 { len_acc as f32 / ends as f32 } else { 0.0 },
             leans: env.leans().into_iter().take(16).collect(),
         };
+        best = best.max(sample.reward);
+
+        // A checkpoint carries what produced it (Law 05), so a blob on disk is
+        // always traceable back to a scene, a seed and a reward.
+        if env_steps >= next_ckpt {
+            next_ckpt += CKPT_EVERY;
+            let manifest = ckpt::Manifest {
+                run: RUN_ID.into(),
+                scene: "balance + velocity tracking".into(),
+                seed,
+                step: env_steps,
+                score: best as f64,
+                n_obs: N_OBS,
+                n_act: N_ACT,
+                hidden: 64,
+                terms: TERM_NAMES
+                    .iter()
+                    .zip(TERM_WEIGHTS.iter())
+                    .map(|(n, w)| (n.to_string(), *w as f64))
+                    .collect(),
+            };
+            let name = format!("ckpt-{:04}k", env_steps / 1000);
+            if let Err(e) = ckpt::write(RUN_ID, &name, &ppo.to_weights(), &manifest) {
+                eprintln!("checkpoint {name} failed: {e}");
+            }
+        }
+
         if let Ok(mut g) = shared.lock() {
             g.samples.push(sample);
             // The UI only ever plots a window; unbounded history would grow

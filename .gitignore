@@ -3,3 +3,6 @@
 
 # Robot meshes are fetched, not committed: see tools/fetch_robot_meshes.py
 data/g1/meshes/
+
+# Checkpoints are run artifacts, not source.
+/runs

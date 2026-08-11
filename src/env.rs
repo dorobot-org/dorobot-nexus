@@ -154,6 +154,24 @@ impl VecEnv {
         StepOut { reward, terms, done, fell }
     }
 
+    /// Cart position and pole angle, for drawing.
+    pub fn pose(&self, i: usize) -> (f32, f32) {
+        (self.s[i].x, self.s[i].th)
+    }
+
+    /// Apply an impulse to the cart. This is the "push" in Inspect: because the
+    /// simulation is in this process, perturbing it is a function call.
+    pub fn push(&mut self, i: usize, dv: f32) {
+        self.s[i].dx += dv;
+    }
+
+    /// Force a fresh episode with a chosen command, for a repeatable probe.
+    pub fn restart(&mut self, i: usize, cmd: f32) {
+        let rng = &mut self.rng;
+        Self::reset_one(&mut self.s[i], rng);
+        self.s[i].cmd = cmd;
+    }
+
     /// Lean of each environment, for the contact sheet. Normalised to ±1.
     pub fn leans(&self) -> Vec<f32> {
         self.s.iter().map(|s| (s.th / FALL_ANGLE).clamp(-1.0, 1.0)).collect()
