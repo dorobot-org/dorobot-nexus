@@ -8,6 +8,14 @@ description = "Native training studio for GPU reinforcement learning on humanoid
 name = "dorobot-nexus"
 path = "src/main.rs"
 
+[features]
+# Drives zealot's GPU biped trainer instead of the built-in CPU learner. It
+# adds no dependencies on purpose — zealot is a subprocess, not a crate — so
+# this flag only compiles the client that reads its metric stream, and a clean
+# clone still builds with nothing but a Rust toolchain. Build the stack with
+# scripts/setup-zealot.sh; without it the app falls back to the CPU trainer.
+zealot = []
+
 [dependencies]
 makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev" }
 # The panel shell and the URDF viewer are shared with DoRobot Studio. Nothing

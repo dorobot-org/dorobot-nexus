@@ -6,3 +6,10 @@ data/g1/meshes/
 
 # Checkpoints are run artifacts, not source.
 /runs
+
+# Built by scripts/setup-zealot.sh: upstream checkouts, never edited or committed.
+zealot-stack/
+
+# Checkpoints written by the zealot backend.
+*.safetensors
+*.safetensors.best

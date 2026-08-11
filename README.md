@@ -124,37 +124,67 @@ catalogue. A run that is upright, not falling, and flat on tracking reports
 *Command ignored*, with the live numbers — so the next person does not spend an
 hour finding it by hand.
 
-## Why nexus and zealot are not linked
+## How zealot is linked
 
-The design premise was that nexus and makepad could share one GPU device in one
-process. Both halves of that turned out to be wrong here, and the evidence is
-worth recording rather than quietly dropping.
+An earlier version of this file claimed the dimforge GPU stack "cannot be built
+outside its authors' machines" and that "none of those forks are public". Both
+claims were wrong. Every fork is public, and the stack builds here: 122 SPIR-V
+modules compile, khal selects Metal/WebGPU, and 256 GPU environments step. The
+record is corrected rather than deleted, because the reasons the first attempt
+failed are the useful part.
 
-**The dimforge GPU stack cannot be built outside its authors' machines.**
-`nexus3d` is not published to crates.io — zealot depends on it by path, at
-`../nexus/crates/nexus3d`. Its shaders need `cargo-gpu` (installable, and I did
-install it), but the crates.io `vortx 0.3.0` then fails to emit its SPIR-V:
+Three things made a buildable stack look unbuildable, and two were misreadings:
 
-```
-error: proc macro panicked
-  --> vortx-0.3.0/src/lib.rs:12:38
-   = help: ".../out/shaders-spirv" is not a directory
-```
+1. **`path = "../vortx-unified"` names a directory, not a repo.** The `-unified`
+   suffixes are *branches* — `vortx/unified`, `khal/unified` — on public forks.
+2. **A `[patch]` whose version does not satisfy the requirement is silently
+   ignored.** Cargo links the crates.io crate and says so only in a warning:
+   `patch 'vortx v0.2.0' was not used in the crate graph`. Fork default branches
+   are older versions, so patching without naming the branch quietly no-ops and
+   the resulting type errors point anywhere but at the cause. This one bites
+   twice: parry's `spirv-compat` branch is 0.26.1 while nexus requires 0.29, so
+   the fix is `rebase/nexus-0.4`, and the symptom of getting it wrong is stock
+   parry3d under the GPU solver — which reads as a physics bug.
+3. **The crates.io crate named `cargo-gpu` is a placeholder** that prints
+   "Coming Soon" and exits 0. khal's build script shells out to it, sees
+   success, emits no SPIR-V, and the failure surfaces thousands of lines later
+   as a runtime panic about a missing `.spv`. The real tool is
+   `Rust-GPU/cargo-gpu`.
 
-zealot's own manifest explains why: it redirects `vortx`, `khal` and `rapier3d`
-to **unpublished local dimforge forks** via `[patch.crates-io]`, plus a vendored
-`naga` carrying a fix for a Metal miscompilation — without which, in their
-words, "the biped free-fell then launched on macOS". None of those forks are
-public.
+`scripts/setup-zealot.sh` encodes all of it, and fails loudly on a dropped
+patch instead of building something subtly wrong.
 
-**And makepad does not use wgpu on macOS.** It renders through Metal directly
-(`platform/src/os/apple/metal.rs`; no wgpu anywhere in `makepad-platform`). So
-even with the stack building, nexus and the UI would be two GPU contexts in one
-process on this platform — one process, but not one device.
+**zealot is driven as a subprocess, not linked as a crate.** That is forced,
+not stylistic. Its `lib.rs` exposes nothing but `mod guides` — the training code
+lives in `src/bin/` behind `#[path]` includes — and it path-depends on five
+sibling checkouts outside its own repo, so it cannot be a git dependency, and
+cannot be an optional path dependency either: cargo loads every dependency
+manifest during resolution whether or not a feature enables it, so a missing
+sibling breaks a clean clone. Reading its stdout keeps zealot's Rust untouched
+and keeps `cargo build` here working with nothing but a toolchain.
 
-The architecture the design already called for survives this intact: the trainer
-is a job behind a metric stream. Swapping this CPU learner for a GPU one is a
-change to `src/trainer.rs` and nothing else — no screen knows the difference.
+**Sharing one GPU device was never on the table anyway.** makepad renders
+through Metal directly on macOS (`platform/src/os/apple/metal.rs`; no wgpu in
+`makepad-platform`), so nexus and the UI would be two GPU contexts in one
+process regardless — one process, but not one device. A process boundary costs
+nothing that was available to begin with.
+
+The architecture the design called for survives intact: the trainer is a job
+behind a metric stream, so `src/zealot.rs` swaps the producer and no screen
+knows the difference.
+
+### Known: the sim NaNs on Metal
+
+zealot's 29-DoF G1 goes NaN at step 0 on Metal, so the GPU backend currently
+streams NaN rewards. This is upstream, not a packaging fault: everything below
+zealot passes its own GPU tests on this machine (vortx 14/14, nexus_rbd3d 5/5),
+the naga patch that fixes the known MSL miscompile is verifiably applied, and
+the failure is unchanged with terrain, spawn randomisation and decimation off
+on a mesh-free primitive model. zealot's own macOS guide documents a
+`contact_probe` verification that no longer exists after its restructure, and
+the healthy spawn height it records (0.718) does not match the current default
+robot (0.842), so that guide predates today's default. The CPU learner remains
+the default backend until this is resolved.
 
 ## Running it
 

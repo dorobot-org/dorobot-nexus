@@ -51,6 +51,14 @@ impl Handle {
     pub fn stop(&self) {
         let _ = self.tx.send(Cmd::Stop);
     }
+
+    /// Wrap a run this module did not start. The zealot backend produces the
+    /// same `Shared` from a subprocess, and every screen stays a consumer of
+    /// the stream rather than of whoever fills it.
+    #[cfg(feature = "zealot")]
+    pub fn external(shared: Arc<Mutex<Shared>>, tx: Sender<Cmd>) -> Self {
+        Self { shared, tx }
+    }
 }
 
 /// Start a run. `envs` is the population, `total_steps` the budget in env-steps.

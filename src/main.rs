@@ -23,6 +23,8 @@ mod state;
 mod sweep;
 mod trainer;
 mod ux;
+#[cfg(feature = "zealot")]
+mod zealot;
 
 use screens::{
     inspect::InspectScreenWidgetRefExt, runs::RunsScreenWidgetRefExt,
@@ -39,6 +41,30 @@ fn headless(total: u64) -> ! {
     // --no-random trains at nominal physics, which is the control case for
     // showing that the sweep measures anything at all.
     let randomize = !std::env::args().any(|a| a == "--no-random");
+
+    // With --features zealot and a built stack, the same loop reports zealot's
+    // GPU run. `total` stays a budget in env-steps for both backends: zealot
+    // counts iterations, and at 256 envs it emits 24 steps per env per
+    // iteration, so the budget converts rather than changing meaning.
+    #[cfg(feature = "zealot")]
+    let h = match zealot::spawn(
+        envs,
+        (total / (envs as u64 * 24)).max(1),
+        "dorobot_nexus.safetensors",
+    ) {
+        Some(h) => {
+            println!("backend: zealot ({})", zealot::binary_path().display());
+            h
+        }
+        None => {
+            println!(
+                "backend: CPU (no zealot binary at {}; run scripts/setup-zealot.sh)",
+                zealot::binary_path().display()
+            );
+            trainer::spawn_with(envs, total, 1, randomize)
+        }
+    };
+    #[cfg(not(feature = "zealot"))]
     let h = trainer::spawn_with(envs, total, 1, randomize);
     let mut shown = 0usize;
     loop {
@@ -284,7 +310,25 @@ impl MatchEvent for App {
     fn handle_startup(&mut self, cx: &mut Cx) {
         // 256 environments for 4M steps: enough that the balance task is solved
         // while you watch, which is the point of having the screen at all.
-        self.trainer = Some(trainer::spawn(256, 4_000_000, 1));
+        //
+        // With --features zealot, the same screens are fed by zealot's GPU
+        // biped trainer when its stack has been built; the CPU learner remains
+        // the fallback, so a missing build degrades to a working app rather
+        // than an empty one.
+        #[cfg(feature = "zealot")]
+        {
+            self.trainer = zealot::spawn(256, 2_000, "dorobot_nexus.safetensors");
+            if self.trainer.is_none() {
+                ::log::warn!(
+                    "zealot binary not found at {} — falling back to the CPU trainer \
+                     (run scripts/setup-zealot.sh to build it)",
+                    zealot::binary_path().display()
+                );
+            }
+        }
+        if self.trainer.is_none() {
+            self.trainer = Some(trainer::spawn(256, 4_000_000, 1));
+        }
         self.poll = cx.start_interval(0.2);
         self.sync(cx);
     }
