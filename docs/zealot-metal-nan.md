@@ -99,7 +99,8 @@ Finite reward, real fall counts, finite KL with the adaptive learning rate
 responding to it — 3.5 s/iteration at 256 envs. Previously every one of these
 was `NaN` with all 6144 samples terminating.
 
-And it learns. 600 iterations at 512 envs on flat ground, ~5 s/iteration:
+And the optimiser moves the reward — though see below for what that does and
+does not mean. 600 iterations at 512 envs on flat ground, ~5 s/iteration:
 
 ```
 iter 100  −0.4108   falls 5674   ← trough
@@ -122,33 +123,49 @@ penalty growing to −0.92 as a more active policy terminated more often. A sing
 reward curve would have read as "not learning"; the per-term decomposition
 showed otherwise.
 
-### What this does *not* show
+### End-to-end validation with a known-good policy
 
-An earlier version of this section reported "84% survival" for the trained
-policy against 54% for an early one, from resets-per-frame in a `biped_drive`
-rollout. That metric is wrong: counting the fraction of frames that are not
-resets flatters a robot that falls every six steps. Corrected rather than
-deleted, since the mis-framing is the instructive part.
+The decisive check is not a policy trained here but zealot's own published
+50k-iteration checkpoint
+([HuggingFace](https://huggingface.co/haixuantao/zealot-g1-locomotion),
+`g1_v28_final50k.safetensors`) driven on this Metal build. Before the patch,
+every rollout was `NaN` inside one step. After it, 6-second rollouts on flat
+ground:
 
-The honest measure is mean episode length, taken from the training log itself:
+| scenario | commanded vx / yaw | achieved | falls | distance |
+|---|---|---|---|---|
+| stand | 0.0 / 0 | −0.012 / −0.029 | **0** | 0.10 m |
+| forward | 0.3 / 0 | +0.634 / −0.045 | 1 | 0.94 m |
+| fast | 0.6 / 0 | +0.879 / +0.080 | **0** | **5.07 m** |
+| backward | −0.3 / 0 | −0.642 / −0.140 | 2 | 3.61 m |
+| turn | 0 / 0.5 | +0.086 / −0.154 | 1 | 0.15 m |
 
-| iter | fall rate | mean episode |
-|---|---|---|
-| 0 (random init) | 5.4% | **18.6 steps** |
-| 100 | 46.2% | 2.2 steps |
-| 300 | 42.4% | 2.4 steps |
-| 599 | 16.6% | **6.0 steps** |
+A trained policy stands, walks 5 m without falling, and reverses on a negative
+command. Linear direction is correct in every case; magnitude overshoots ~2×
+and yaw tracking is wrong-signed, both consistent with a config mismatch
+between training and `biped_drive` rather than a physics fault.
 
-No episode ever reached the time limit, and the trained policy survives *less*
-long than the untrained one. The rising reward came from reward-term shaping,
-not from staying upright.
+### What training here does *not* show
 
-So the fix demonstrates that **the training loop runs correctly on Metal** —
-real physics, live PPO, a reward that responds to the policy. It does not
-demonstrate a walking policy. 600 iterations at 512 envs is well short of
-zealot's own reference (2000 at 1024 envs, reward positive by ~iter 250; this
-run is still negative at 599), so the shortfall may be budget, configuration, or
-a further defect — this measurement cannot distinguish them.
+A 600-iteration run at 512 envs produces a policy that falls every ~6 steps,
+worse than random initialisation, while its reward improves. That is not
+evidence of anything wrong: zealot's documented recipe is `50000 4096`, and its
+published checkpoints are named `iter21k`, `iter32780`, `final50k`. 600×512 is
+**0.15%** of 50000×4096.
+
+Two earlier readings of that run were wrong and are corrected rather than
+deleted, because the mis-readings are the instructive part:
+
+1. It was first reported as "84% survival vs 54%", from resets-per-frame. That
+   metric counts the fraction of frames that are not resets, which flatters a
+   robot falling every six steps. The honest measure is mean episode length:
+   18.6 steps at random init, 2.2 at iter 100, 6.0 at iter 599.
+2. The shortfall was then blamed on the second miscompile, since that run
+   predated the integration-loop fix by seven hours. An A/B at matched
+   iterations refutes it — fixed physics gives −0.4045 with 5882 falls at iter
+   100 against unfixed −0.4108 with 5674. Near-identical. The physics fix is
+   real and measurable in the zero-action probe, but it is not what limited
+   that training run; compute was.
 
 ## How it was found, and the trap that hid it
 

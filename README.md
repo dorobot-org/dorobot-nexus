@@ -78,38 +78,41 @@ $ dorobot-nexus --headless 1200000
   1171456 steps  reward  0.757  falls   0.0%  ep_len   400      41k steps/s
 ```
 
-**Verified, zealot on Apple Silicon** — 600 iterations, 512 envs, flat ground:
+**Verified, zealot on Apple Silicon.** The strongest evidence is not a run
+trained here but zealot's own published 50k-iteration policy
+([HuggingFace](https://huggingface.co/haixuantao/zealot-g1-locomotion)) driven
+on this Metal build. On the unfixed build every rollout was `NaN` within one
+step; after the patch:
 
-```
-iter 100  −0.4108   falls 5674   ← trough
-iter 300  −0.3336   falls 5100
-iter 500  −0.1523   falls 2763
-iter 599  −0.0956   falls 2012   curriculum 0.00 → 0.40
-```
+| scenario | commanded vx / yaw | achieved | falls in 6 s | distance |
+|---|---|---|---|---|
+| stand | 0.0 / 0 | −0.012 / −0.029 | **0** | 0.10 m |
+| forward | 0.3 / 0 | +0.634 / −0.045 | 1 | 0.94 m |
+| fast | 0.6 / 0 | +0.879 / +0.080 | **0** | **5.07 m** |
+| backward | −0.3 / 0 | −0.642 / −0.140 | 2 | 3.61 m |
+| turn | 0 / 0.5 | +0.086 / −0.154 | 1 | 0.15 m |
 
-Reward up 77% from the trough, falls down 65%, monotonic, while the curriculum
-*raised* difficulty.
+It stands on command without falling — where a passive PD hold collapses in ~44
+steps — walks 5 m without a fall, and reverses correctly on a negative command.
+Two blemishes worth stating: linear speed overshoots ~2× consistently, and yaw
+tracking is wrong-signed, both likely a config mismatch between how the policy
+was trained and how `biped_drive` invokes it rather than a physics fault.
 
-**But the policy is not good, and the reward curve hides it.** Mean episode
-length from the same log:
+**Training a policy here is a different matter — one of budget.** zealot's
+documented recipe is `biped_train_gpu -- 50000 4096`, and its published
+checkpoints are named `g1_v21_iter21k`, `g1_v24_iter32780`, `g1_v28_final50k`.
+A 600-iteration run at 512 envs, which is what fits in an interactive session
+here, is **0.15% of that compute**. It produces a policy that falls every ~6
+steps — worse than random initialisation — while its reward improves through
+term shaping.
 
-| iter | fall rate | mean episode |
-|---|---|---|
-| 0 (random init) | 5.4% | **18.6 steps** |
-| 100 | 46.2% | 2.2 steps |
-| 599 | 16.6% | **6.0 steps** |
-
-Zero episodes ever reached the time limit, and the trained policy survives
-*less* long than the untrained one. Rising reward came from reward-term shaping,
-not from staying upright. 600 iterations is also well short of zealot's own
-reference (2000 iterations at 1024 envs, reward positive by ~250; this run is
-still negative at 599).
-
-So what is demonstrated is that **the training loop works on Metal** — finite
-physics, live PPO, a reward that responds — not that a walking policy has been
-produced. An earlier version of this file claimed "84% survival" for the trained
-policy; that metric counted the fraction of frames that were not resets, which
-flatters a robot falling every six steps. Corrected rather than deleted.
+That is not a failure of the loop; it is 0.15% of a training run. An earlier
+version of this file reported that under-trained policy as evidence, first with
+a "84% survival" metric that counted non-reset frames (flattering a robot
+falling every six steps), and then blamed the shortfall on residual physics
+bugs. Both were wrong: an A/B at matched iterations shows fixed and unfixed
+physics give near-identical early curves (−0.4045 vs −0.4108 at iter 100).
+Corrected rather than deleted.
 
 ---
 
