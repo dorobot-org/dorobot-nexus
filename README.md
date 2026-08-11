@@ -175,6 +175,21 @@ knows the difference.
 
 ### Known: the sim NaNs on Metal
 
+Measured and written up in [docs/zealot-metal-nan.md](docs/zealot-metal-nan.md):
+one `env.step()` writes the multibody mass matrix as NaN (935 of 961 entries)
+from a fully finite `dof_state`, and everything downstream follows. Thirteen
+candidate causes are ruled out there by experiment.
+
+The trap worth knowing before trusting any rollout: **zealot resets on
+termination before recording the next frame**, so a policy that falls on step
+one still produces a clean, finite, upright trajectory — the spawn pose over
+and over. A real run here gave 51 frames with 50 resets and looked perfectly
+healthy. Running the same rollout with a trained policy and with all-zero
+actions produced byte-identical output, which is what gave it away. `Rollout`
+therefore parses `resets` and exposes `collapsed()`, and the sweep reports such
+cells as unmeasured rather than scoring them.
+
+
 zealot's 29-DoF G1 goes NaN at step 0 on Metal, so the GPU backend currently
 streams NaN rewards. This is upstream, not a packaging fault: everything below
 zealot passes its own GPU tests on this machine (vortx 14/14, nexus_rbd3d 5/5),
