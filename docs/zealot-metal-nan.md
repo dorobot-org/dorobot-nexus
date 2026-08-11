@@ -236,7 +236,44 @@ Two options, in order of preference:
 2. Audit `naga-fixed`'s `break_if` gate against this case. The fix is applied
    here and this loop is still miscompiled, so the gate does not cover it.
 
-Worth auditing more broadly: the same `while cond { …; i += k }` shape appears
-elsewhere in the multibody kernels (`compute_dynamics_pre.rs` also has
-`while k < num_links { …; k += t }`). Those were not observed failing here, but
-they are the same construct and the same risk.
+## A second, quieter instance
+
+The same file's integration loop is miscompiled too, and it is worth separating
+from the first because it fails differently:
+
+```rust
+let mut k = lane;
+while k < num_links { integrate_link(…, k, …); k += t; }
+```
+
+This one runs several iterations, so dropping the final one is not fatal — the
+last link assigned to each lane simply never integrates, every step. No NaN, no
+crash, just a quietly wrong simulation. That is why it survived the first round
+of testing: everything looked healthy.
+
+Measured with the zero-action probe, 32 envs, fixed seed, mean first-episode
+length:
+
+| build | runs | mean |
+|---|---|---|
+| `while` | 43.0, 43.0, 43.1 | **43.0** |
+| bounded `for` | 54.2, 54.3 | **54.3** |
+
+Run-to-run noise is ±0.1 steps, so an 11-step gap is ~100× the noise: real and
+reproducible, a 26% change in how long the robot stays up. Which figure is
+*physically* correct cannot be settled here without a CUDA reference — what can
+be said is that integrating every link is what the source says it does, and
+that zealot's "~step 40" expectation comes from a document that predates the
+current default robot (its healthy spawn height, 0.718, does not match today's
+0.842).
+
+Both sites are in the shipped patch.
+
+### Three other instances that do not matter here
+
+`impulse_joint_constraints/kernels.rs` has three grid-stride
+`while i < cap { … }` loops of exactly the catastrophic one-iteration shape.
+They are **not** patched, because this robot never exercises them: zealot builds
+its `ImpulseJointSet` empty and never inserts into it (zero insertions), so
+`cap` and `len` are zero and the loops iterate zero times by design. They remain
+a hazard for any scene that does use impulse joints.

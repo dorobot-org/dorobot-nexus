@@ -1,5 +1,5 @@
 diff --git a/src_rbd_shaders/dynamics/multibody/compute_dynamics_pre.rs b/src_rbd_shaders/dynamics/multibody/compute_dynamics_pre.rs
-index d96725d..afd2892 100644
+index d96725d..cb416a1 100644
 --- a/src_rbd_shaders/dynamics/multibody/compute_dynamics_pre.rs
 +++ b/src_rbd_shaders/dynamics/multibody/compute_dynamics_pre.rs
 @@ -14,7 +14,7 @@ use khal_std::index::MaybeIndexUnchecked;
@@ -11,7 +11,25 @@ index d96725d..afd2892 100644
  use super::ws_soa::{
      WS_JOINT_ROT, WS_JOINT_VEL, WS_LTP, WS_LTW, WS_RB_VELS, WS_SHIFT02, WS_SHIFT23, WsAddr,
      ws_coords, ws_pose, ws_rot, ws_set_pose, ws_set_vec, ws_set_vel, ws_vec, ws_vel, ws_vel_ang,
-@@ -259,11 +259,19 @@ fn dynamics_pre_impl<const INTEGRATE: bool>(
+@@ -145,8 +145,16 @@ fn dynamics_pre_impl<const INTEGRATE: bool>(
+     //    `INTEGRATE` is a const generic, so the barrier stays in provably
+     //    uniform control flow after folding (Tint requirement).
+     if INTEGRATE {
++        // NOTE: we use fixed-size for loops to avoid miscompilation issues of
++        // while loops on MacOs — the same remedy this codebase already applies
++        // in narrow_phase.rs, lbvh.rs, epa*.rs and convex_polyhedron.rs. The
++        // miscompile drops the FINAL iteration, so a strided loop like this one
++        // silently skips the last link it was assigned.
+         let mut k = lane;
+-        while k < num_links {
++        for _ in 0..num_links {
++            if k >= num_links {
++                break;
++            }
+             super::integrate::integrate_link(&stat_slice, links_workspace, wa, k, &vel_slice, dt);
+             k += t;
+         }
+@@ -259,11 +267,19 @@ fn dynamics_pre_impl<const INTEGRATE: bool>(
                  let mut a = k;
                  for _ in 0..MAX_MB_DOFS as u32 {
                      let sd = stat_slice[a as usize];
@@ -36,7 +54,25 @@ index d96725d..afd2892 100644
                      }
                      if a == 0 {
                          break;
-@@ -784,11 +792,19 @@ fn dynamics_pre_wc_impl<const INTEGRATE: bool>(
+@@ -719,8 +735,16 @@ fn dynamics_pre_wc_impl<const INTEGRATE: bool>(
+     //    `INTEGRATE` is a const generic, so the barrier stays in provably
+     //    uniform control flow after folding (Tint requirement).
+     if INTEGRATE {
++        // NOTE: we use fixed-size for loops to avoid miscompilation issues of
++        // while loops on MacOs — the same remedy this codebase already applies
++        // in narrow_phase.rs, lbvh.rs, epa*.rs and convex_polyhedron.rs. The
++        // miscompile drops the FINAL iteration, so a strided loop like this one
++        // silently skips the last link it was assigned.
+         let mut k = lane;
+-        while k < num_links {
++        for _ in 0..num_links {
++            if k >= num_links {
++                break;
++            }
+             super::integrate::integrate_link(&stat_slice, links_workspace, wa, k, &vel_slice, dt);
+             k += t;
+         }
+@@ -784,11 +808,19 @@ fn dynamics_pre_wc_impl<const INTEGRATE: bool>(
                  let mut a = k;
                  for _ in 0..MAX_MB_DOFS as u32 {
                      let sd = stat_slice[a as usize];
