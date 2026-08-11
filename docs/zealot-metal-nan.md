@@ -122,12 +122,33 @@ penalty growing to −0.92 as a more active policy terminated more often. A sing
 reward curve would have read as "not learning"; the per-term decomposition
 showed otherwise.
 
-The behaviour transfers. Same command, same 4-second rollout, flat ground:
+### What this does *not* show
 
-| policy | resets / frames | survival |
+An earlier version of this section reported "84% survival" for the trained
+policy against 54% for an early one, from resets-per-frame in a `biped_drive`
+rollout. That metric is wrong: counting the fraction of frames that are not
+resets flatters a robot that falls every six steps. Corrected rather than
+deleted, since the mis-framing is the instructive part.
+
+The honest measure is mean episode length, taken from the training log itself:
+
+| iter | fall rate | mean episode |
 |---|---|---|
-| 30 iterations | 93 / 201 | 54% |
-| 600 iterations | 33 / 201 | **84%** |
+| 0 (random init) | 5.4% | **18.6 steps** |
+| 100 | 46.2% | 2.2 steps |
+| 300 | 42.4% | 2.4 steps |
+| 599 | 16.6% | **6.0 steps** |
+
+No episode ever reached the time limit, and the trained policy survives *less*
+long than the untrained one. The rising reward came from reward-term shaping,
+not from staying upright.
+
+So the fix demonstrates that **the training loop runs correctly on Metal** —
+real physics, live PPO, a reward that responds to the policy. It does not
+demonstrate a walking policy. 600 iterations at 512 envs is well short of
+zealot's own reference (2000 at 1024 envs, reward positive by ~iter 250; this
+run is still negative at 599), so the shortfall may be budget, configuration, or
+a further defect — this measurement cannot distinguish them.
 
 ## How it was found, and the trap that hid it
 

@@ -61,7 +61,7 @@ screen", and `zealot.rs` is that swap.
 | Task | balance + velocity tracking, inverted pendulum | Unitree G1 biped locomotion |
 | Physics | `src/env.rs`, vectorised, in-process | nexus on the GPU via khal → Metal/Vulkan/CUDA |
 | Learner | `src/rl.rs` — PPO/GAE/Adam, hand-rolled MLP | zealot's GPU PPO |
-| Throughput | ~41k env-steps/s, 256 envs | ~5 s/iter at 512 envs |
+| Throughput | ~40k env-steps/s, 256 envs | ~1.9k samples/s, 256 envs |
 | Linked how | compiled in | **subprocess**, parsed from stdout |
 | Dependencies added | — | **none** |
 
@@ -88,8 +88,85 @@ iter 599  −0.0956   falls 2012   curriculum 0.00 → 0.40
 ```
 
 Reward up 77% from the trough, falls down 65%, monotonic, while the curriculum
-*raised* difficulty. The trained policy survives 84% of a 4-second rollout
-against 54% for a 30-iteration one.
+*raised* difficulty.
+
+**But the policy is not good, and the reward curve hides it.** Mean episode
+length from the same log:
+
+| iter | fall rate | mean episode |
+|---|---|---|
+| 0 (random init) | 5.4% | **18.6 steps** |
+| 100 | 46.2% | 2.2 steps |
+| 599 | 16.6% | **6.0 steps** |
+
+Zero episodes ever reached the time limit, and the trained policy survives
+*less* long than the untrained one. Rising reward came from reward-term shaping,
+not from staying upright. 600 iterations is also well short of zealot's own
+reference (2000 iterations at 1024 envs, reward positive by ~250; this run is
+still negative at 599).
+
+So what is demonstrated is that **the training loop works on Metal** — finite
+physics, live PPO, a reward that responds — not that a walking policy has been
+produced. An earlier version of this file claimed "84% survival" for the trained
+policy; that metric counted the fraction of frames that were not resets, which
+flatters a robot falling every six steps. Corrected rather than deleted.
+
+---
+
+## Benchmarks
+
+Apple Silicon, macOS 25.5, best-of-N per configuration. **Caveat:** the host was
+not idle during measurement (other builds running); single samples varied 12k →
+27k → 40k env-steps/s on the CPU before settling, so these are best-of and an
+idle machine would do better.
+
+### zealot GPU (Metal), G1 biped
+
+| envs | s/iter | samples/iter | samples/s |
+|---:|---:|---:|---:|
+| 256 | 3.2 | 6,144 | 1,920 |
+| 512 | 3.9 | 12,288 | 3,151 |
+| 1024 | 5.6 | 24,576 | 4,388 |
+
+4× the environments buys 2.3× throughput, so per-env cost keeps falling — the
+whole argument for batching on GPU. zealot's own docs claim ~4.1 s/iter at 1024
+envs on an M-series Mac against the 5.6 measured here; same ballpark on a busy
+machine.
+
+Per-step cost breakdown at 1024 envs (ms):
+
+```
+gpuwait=127.8   reward=20.6   commit=16.8   pipe=11.7   readback=4.6   flush=2.6
+```
+
+`gpuwait` dominates, so this is genuinely GPU-bound — the host is not the
+bottleneck and a faster GPU would show up directly.
+
+### CPU learner, cart-pole
+
+| envs | env-steps/s |
+|---:|---:|
+| 256 | 38,000–40,000 |
+
+### Why these two numbers must not be compared
+
+The CPU figure is ~20× larger and that comparison is meaningless, because the
+workloads differ by orders of magnitude:
+
+| | CPU learner | zealot GPU |
+|---|---|---|
+| Bodies | 2 | 39 links |
+| Multibody DOF | ~2 | 31 |
+| Actuated joints | 1 | 12 |
+| Obs / action dims | 5 / 1 | 265 / 12 |
+| Contacts, terrain | none | yes |
+
+A cart-pole is a 2×2 mass matrix; the G1 is a 31-DOF articulated multibody with
+an LU factorisation, contact solving and terrain. The multibody solve alone is
+roughly cubic in DOF — about 3,700× more arithmetic per step before contacts are
+counted. Per unit of physics work the GPU is far ahead, but that cannot be
+turned into an honest ratio here: there is no common workload, since zealot has
+no CPU biped trainer and this repo has no GPU cart-pole.
 
 ---
 
