@@ -1,0 +1,13 @@
+[package]
+name = "nexus-studio"
+version = "0.1.0"
+edition = "2021"
+description = "dorobot-nexus RL training studio — makepad port of the approved web mockup"
+license = "MIT"
+
+[dependencies]
+makepad-widgets = { workspace = true }
+makepad-plot = { path = "../crates/makepad-plot" }
+rfd = { workspace = true }
+objc = "0.2"
+makepad-urdf-player = { git = "https://github.com/dorobot-org/makepad-urdf-viewer", rev = "24bfa8f" }
