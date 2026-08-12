@@ -19,6 +19,7 @@ mod probe;
 mod screens;
 mod rl;
 mod rng;
+mod scene;
 mod state;
 mod sweep;
 mod trainer;
@@ -39,6 +40,7 @@ use state::Studio;
 use ux::Screen;
 // Imported bare, not written as `zealot::RolloutSlot` in the field: the Script
 // derive rejects a qualified path type with "Unexpected field form".
+use scene::Scene;
 use zealot::RolloutSlot;
 
 /// `--headless N` trains without a window and prints progress. The fastest way
@@ -175,10 +177,59 @@ fn track_check() -> ! {
     std::process::exit(0);
 }
 
+/// `--curriculum [iters_each] [rounds]` trains across the saved scene set,
+/// resuming the same checkpoint as the world changes under it.
+#[cfg(feature = "zealot")]
+fn headless_curriculum(iters_each: u64, rounds: usize) -> ! {
+    let scenes = scene::list();
+    println!("curriculum over {} scene(s), {iters_each} iters each x {rounds} round(s):", scenes.len());
+    for sc in &scenes {
+        println!("  {:<28} {}", sc.name, sc.summary());
+    }
+    let set: Vec<(String, Vec<(&'static str, String)>)> =
+        scenes.iter().map(|s| (s.name.clone(), s.knobs())).collect();
+    let Some(h) = zealot::spawn_curriculum(set, 256, iters_each, rounds, "curriculum.safetensors")
+    else {
+        eprintln!("no zealot binary — run scripts/setup-zealot.sh");
+        std::process::exit(1);
+    };
+    let mut shown = 0usize;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let (n, done, line) = {
+            let g = h.shared.lock().unwrap();
+            let line = g.samples.last().map(|s| {
+                format!(
+                    "{:>9} steps  reward {:>7.4}  falls {:>5.1}%",
+                    s.step, s.reward, s.fall_rate * 100.0
+                )
+            });
+            (g.samples.len(), !g.running, line)
+        };
+        if n > shown {
+            if let Some(l) = line {
+                println!("{l}");
+            }
+            shown = n;
+        }
+        if done {
+            break;
+        }
+    }
+    println!("curriculum finished");
+    std::process::exit(0);
+}
+
 fn maybe_headless() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--track-check") {
         track_check();
+    }
+    #[cfg(feature = "zealot")]
+    if let Some(i) = args.iter().position(|a| a == "--curriculum") {
+        let iters = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(20);
+        let rounds = args.get(i + 2).and_then(|v| v.parse().ok()).unwrap_or(1);
+        headless_curriculum(iters, rounds);
     }
     if args.iter().any(|a| a == "--sweep") {
         headless_sweep();
@@ -264,14 +315,104 @@ pub struct App {
     rollout: RolloutSlot,
     #[rust]
     rollout_frame: usize,
+    #[rust(true)]
+    rollout_playing: bool,
     #[rust]
     urdf_joints: Vec<String>,
+    /// The simulation configuration the Scene screen is showing.
+    #[rust]
+    scene: Scene,
+    #[rust(false)]
+    terrain_loaded: bool,
 }
 
 impl App {
     /// The checkpoint the zealot backend trains into, and therefore the one
     /// the sweep and the sim-to-sim comparison roll out. Kept in one place so
     /// the three screens cannot drift onto different files.
+    /// Roll the checkpoint out on the current terrain, off-thread.
+    #[cfg(feature = "zealot")]
+    fn respawn_rollout(&mut self) {
+        let ckpt = self.zealot_ckpt();
+        if !zealot::drive_path().is_file() || !std::path::Path::new(&ckpt).is_file() {
+            return;
+        }
+        let out = self.rollout.clone();
+        let knobs = self.scene.knobs();
+        let drive = zealot::Drive {
+            vx: self.scene.vx,
+            vy: self.scene.vy,
+            yaw_rate: self.scene.yaw,
+            seconds: self.scene.seconds,
+        };
+        let family = self.scene.terrain.clone();
+        // Clear first: the old rollout is on the wrong terrain, and showing it
+        // under new ground would be a lie the screen cannot detect.
+        out.set(None);
+        self.rollout_frame = 0;
+        std::thread::spawn(move || {
+            out.set(zealot::drive(&ckpt, drive, &knobs));
+            match out.len() {
+                0 => eprintln!("scene: rollout on '{family}' failed"),
+                n => eprintln!("scene: rollout on '{family}' loaded, {n} frames"),
+            }
+        });
+    }
+
+    /// Re-read the scene and recording libraries from disk and show them.
+    #[cfg(feature = "zealot")]
+    fn refresh_library(&mut self, cx: &mut Cx) {
+        let scenes = scene::list();
+        let recs = scene::Recording::list();
+        let active = self.scene.name.clone();
+        self.ui
+            .scene_screen(cx, ids!(page_scene))
+            .show_library(cx, &scenes, &recs, &active);
+    }
+
+    /// Save the loaded rollout as a replayable recording, tagged with the
+    /// scene that produced it.
+    #[cfg(feature = "zealot")]
+    fn record_rollout(&mut self) {
+        let Some(r) = self.rollout.snapshot() else {
+            eprintln!("record: nothing loaded");
+            return;
+        };
+        let dir = scene::Recording::dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("record: {e}");
+            return;
+        }
+        // Name from the scene plus a counter, so recording twice does not
+        // silently overwrite the first take.
+        let base = scene::slug(&self.scene.name);
+        let n = scene::Recording::list().len() + 1;
+        let name = format!("{base}-{n:03}");
+        let rollout_path = dir.join(format!("{name}.rollout.json"));
+        if let Err(e) = std::fs::write(&rollout_path, r.to_json()) {
+            eprintln!("record: {e}");
+            return;
+        }
+        let dist = if r.len() > 1 {
+            let (a, b) = (r.base[0], r.base[r.len() - 1]);
+            ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
+        } else {
+            0.0
+        };
+        let rec = scene::Recording {
+            name: name.clone(),
+            scene: self.scene.name.clone(),
+            frames: r.len(),
+            resets: r.resets.len(),
+            distance: dist,
+            rollout: rollout_path,
+        };
+        match rec.save() {
+            Ok(p) => eprintln!("record: {} -> {}", rec.summary(), p.display()),
+            Err(e) => eprintln!("record: {e}"),
+        }
+    }
+
     #[cfg(feature = "zealot")]
     fn zealot_ckpt(&self) -> String {
         std::env::var("DOROBOT_ZEALOT_CKPT")
@@ -374,23 +515,11 @@ impl MatchEvent for App {
         // simply leaves the model static.
         #[cfg(feature = "zealot")]
         {
-            self.urdf_joints = zealot::urdf_joint_names(
-                &std::path::PathBuf::from("data/g1/g1.urdf"),
-            );
-            let ckpt = self.zealot_ckpt();
-            if zealot::drive_path().is_file() && std::path::Path::new(&ckpt).is_file() {
-                let out = self.rollout.clone();
-                std::thread::spawn(move || {
-                    out.set(zealot::drive(&ckpt, zealot::Drive::default(), &[]));
-                    // stderr, not `log`: this is the one signal that says
-                    // whether the scene is showing a policy or a mannequin,
-                    // and it must not depend on how logging is configured.
-                    match out.len() {
-                        0 => eprintln!("scene: zealot rollout failed; robot stays static"),
-                        n => eprintln!("scene: zealot rollout loaded, {n} frames"),
-                    }
-                });
-            }
+            // Initial terrain family; the Scene picker changes it later.
+            self.scene = Scene::default();
+            self.scene.terrain = std::env::var("DOROBOT_TERRAIN").unwrap_or_default();
+            // One spawn path, so startup and a knob change cannot drift.
+            self.respawn_rollout();
         }
         self.poll = cx.start_interval(0.2);
         self.anim = cx.start_interval(ANIM_TICK as f64);
@@ -406,9 +535,47 @@ impl MatchEvent for App {
             self.anim_debt += ANIM_TICK / dt;
             let step = self.anim_debt.floor();
             self.anim_debt -= step;
-            self.rollout_frame = self.rollout_frame.wrapping_add(step as usize);
+            if self.rollout_playing {
+                self.rollout_frame = self.rollout_frame.wrapping_add(step as usize);
+            }
+            let total = self.rollout.len();
+            if total > 0 {
+                let frame = self.rollout_frame % total;
+                let playing = self.rollout_playing;
+                self.ui
+                    .scene_screen(cx, ids!(page_scene))
+                    .show_playback(cx, frame, total, playing);
+            }
+            // Terrain is static: load it once, after the URDF is up so the
+            // viewer exists to receive it.
+            if !self.terrain_loaded && !self.urdf_joints.is_empty() {
+                self.terrain_loaded = true;
+                let mesh = zealot::ensure_terrain_mesh(&self.scene);
+                let n = self
+                    .ui
+                    .scene_screen(cx, ids!(page_scene))
+                    .set_terrain(cx, mesh.as_deref());
+                if n > 0 {
+                    eprintln!("scene: terrain '{}' loaded, {n} triangles", self.scene.terrain);
+                }
+                let sc = self.scene.clone();
+                let scene = self.ui.scene_screen(cx, ids!(page_scene));
+                scene.show_terrain(cx, &sc.terrain);
+                scene.show_knobs(cx, &sc);
+                self.refresh_library(cx);
+            }
+            // The viewer owns the joint ordering; ask it once the model is up.
+            if self.urdf_joints.is_empty() {
+                self.urdf_joints = self
+                    .ui
+                    .scene_screen(cx, ids!(page_scene))
+                    .movable_joint_names(cx);
+            }
             if let Some(pose) = self.rollout.pose(self.rollout_frame, &self.urdf_joints) {
-                self.ui.scene_screen(cx, ids!(page_scene)).set_pose(cx, &pose);
+                let base = self.rollout.base(self.rollout_frame);
+                self.ui
+                    .scene_screen(cx, ids!(page_scene))
+                    .set_pose(cx, &pose, base);
             }
         }
 
@@ -519,6 +686,116 @@ impl MatchEvent for App {
             match started.or_else(|| crosssim::spawn(trainer::RUN_ID)) {
                 Some(c) => self.cross = Some(c),
                 None => ::log::info!("cross-sim: no checkpoint yet"),
+            }
+            dirty = true;
+        }
+
+        #[cfg(feature = "zealot")]
+        if let Some(act) = self.ui.scene_screen(cx, ids!(page_scene)).library_action(cx, actions) {
+            use screens::scene::Library;
+            match act {
+                Library::Save => {
+                    // Name it for what makes it distinct, so a library of
+                    // scenes is readable without opening them.
+                    let terrain = if self.scene.terrain.is_empty() { "flat" } else { &self.scene.terrain };
+                    self.scene.name = format!(
+                        "{terrain}-f{:.2}-kp{:.2}{}",
+                        self.scene.friction,
+                        self.scene.kp_scale,
+                        if self.scene.push_vel > 0.0 { "-push" } else { "" }
+                    );
+                    match self.scene.save() {
+                        Ok(p) => eprintln!("scene: saved {} -> {}", self.scene.name, p.display()),
+                        Err(e) => eprintln!("scene: save failed: {e}"),
+                    }
+                }
+                Library::LoadScene(i) => {
+                    if let Some(sc) = scene::list().get(i).cloned() {
+                        eprintln!("scene: loaded '{}' ({})", sc.name, sc.summary());
+                        self.scene = sc;
+                        let sc = self.scene.clone();
+                        let screen = self.ui.scene_screen(cx, ids!(page_scene));
+                        screen.show_knobs(cx, &sc);
+                        screen.show_terrain(cx, &sc.terrain);
+                        screen.set_terrain(cx, zealot::ensure_terrain_mesh(&sc).as_deref());
+                        self.respawn_rollout();
+                    }
+                }
+                Library::Replay(i) => {
+                    if let Some(rec) = scene::Recording::list().get(i).cloned() {
+                        match std::fs::read_to_string(&rec.rollout) {
+                            Ok(t) if self.rollout.load_json(&t) => {
+                                self.rollout_frame = 0;
+                                self.rollout_playing = true;
+                                eprintln!("scene: replaying {}", rec.summary());
+                            }
+                            Ok(_) => eprintln!("scene: {} is not a readable rollout", rec.name),
+                            Err(e) => eprintln!("scene: replay failed: {e}"),
+                        }
+                    }
+                }
+            }
+            self.refresh_library(cx);
+            dirty = true;
+        }
+
+        #[cfg(feature = "zealot")]
+        if let Some((knob, value)) = self.ui.scene_screen(cx, ids!(page_scene)).knob_changed(cx, actions) {
+            use screens::scene::Knob;
+            let reshapes = matches!(knob, Knob::TerrainAmp | Knob::TerrainSlope);
+            knob.set(&mut self.scene, value);
+            let sc = self.scene.clone();
+            let screen = self.ui.scene_screen(cx, ids!(page_scene));
+            screen.show_knobs(cx, &sc);
+            if reshapes {
+                // New geometry: regenerate and reload, or the ground on screen
+                // would be a different terrain from the one simulated.
+                screen.set_terrain(cx, zealot::ensure_terrain_mesh(&sc).as_deref());
+            }
+            // Re-roll: the displayed trajectory was produced under the old
+            // physics and no longer describes this scene.
+            self.respawn_rollout();
+            dirty = true;
+        }
+
+        #[cfg(feature = "zealot")]
+        if let Some(t) = self.ui.scene_screen(cx, ids!(page_scene)).transport(cx, actions) {
+            use screens::scene::Play;
+            let total = self.rollout.len().max(1);
+            match t {
+                Play::Toggle => self.rollout_playing = !self.rollout_playing,
+                Play::StepBack => {
+                    self.rollout_playing = false;
+                    self.rollout_frame = self.rollout_frame.saturating_sub(1);
+                }
+                Play::StepForward => {
+                    self.rollout_playing = false;
+                    self.rollout_frame = self.rollout_frame.wrapping_add(1);
+                }
+                Play::Restart => {
+                    self.rollout_frame = 0;
+                    self.rollout_playing = true;
+                }
+                Play::Seek(f) => {
+                    self.rollout_playing = false;
+                    self.rollout_frame = ((f.clamp(0.0, 1.0) * (total - 1) as f64) as usize).min(total - 1);
+                }
+                Play::Record => {
+                    self.record_rollout();
+                    self.refresh_library(cx);
+                }
+            }
+            dirty = true;
+        }
+
+        #[cfg(feature = "zealot")]
+        if let Some(family) = self.ui.scene_screen(cx, ids!(page_scene)).clicked_terrain(cx, actions) {
+            if family != self.scene.terrain {
+                self.scene.terrain = family.to_string();
+                let scene = self.ui.scene_screen(cx, ids!(page_scene));
+                scene.show_terrain(cx, family);
+                scene.set_terrain(cx, zealot::ensure_terrain_mesh(&self.scene).as_deref());
+                self.respawn_rollout();
             }
             dirty = true;
         }
