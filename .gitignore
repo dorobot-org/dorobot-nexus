@@ -13,3 +13,7 @@ zealot-stack/
 # Checkpoints written by the zealot backend.
 *.safetensors
 *.safetensors.best
+
+# Scene library and recordings — user data, not source.
+scenes/
+curriculum.safetensors

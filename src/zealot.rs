@@ -46,6 +46,73 @@ pub fn available() -> bool {
     binary_path().is_file()
 }
 
+/// The terrain families zealot generates, in the order it builds them.
+/// `""` is flat ground — zealot's `BIPED_TERRAIN=0`.
+pub const TERRAIN_FAMILIES: [&str; 5] = ["", "boxes", "rough", "wave", "step"];
+
+/// Where `terrain_export` writes its meshes. Produced by
+/// `scripts/setup-zealot.sh`; absent simply means no terrain is drawn.
+pub fn terrain_dir() -> PathBuf {
+    std::env::var("DOROBOT_TERRAIN_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("zealot-stack/terrain"))
+}
+
+/// `terrain_export` sits beside the trainer, same build.
+pub fn terrain_export_path() -> PathBuf {
+    binary_path().with_file_name("terrain_export")
+}
+
+/// The mesh for a scene's terrain variant, generating it if this variant has
+/// not been exported yet.
+///
+/// Terrain is a family *plus* amplitude, slope and seed — a family alone is
+/// not an identity. Generating on demand is what lets an operator invent a
+/// variant ("rough, twice the relief, up a 10° grade") and see the ground it
+/// actually walks on, rather than being limited to four pre-baked meshes.
+pub fn ensure_terrain_mesh(scene: &crate::scene::Scene) -> Option<PathBuf> {
+    let name = scene.terrain_mesh_name()?;
+    let path = terrain_dir().join(&name);
+    if path.is_file() {
+        return Some(path);
+    }
+    let exporter = terrain_export_path();
+    if !exporter.is_file() {
+        ::log::warn!("terrain: {} missing and no exporter to build it", path.display());
+        return None;
+    }
+    // The exporter writes all four families for these parameters in one pass,
+    // so switching family within a variant costs nothing afterwards.
+    let ok = Command::new(&exporter)
+        .arg(terrain_dir())
+        .arg(scene.seed.to_string())
+        .arg("8")
+        .arg("40")
+        .arg(format!("{:.2}", scene.terrain_amp))
+        .arg(format!("{:.1}", scene.terrain_slope_deg))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        ::log::error!("terrain: export failed for {name}");
+        return None;
+    }
+    path.is_file().then_some(path)
+}
+
+/// The `BIPED_*` knobs that put a rollout on `family`.
+pub fn terrain_knobs(family: &str) -> Vec<(&'static str, String)> {
+    if family.is_empty() {
+        return vec![("BIPED_TERRAIN", "0".to_string())];
+    }
+    vec![
+        ("BIPED_TERRAIN", "1".to_string()),
+        ("BIPED_TERRAIN_FAMILY", family.to_string()),
+    ]
+}
+
 /// `biped_drive` sits next to the trainer: same build, same stack. It rolls a
 /// checkpoint out deterministically in a single environment with randomisation
 /// off, which is exactly what a probe screen wants.
@@ -157,6 +224,32 @@ impl RolloutSlot {
             return None;
         }
         Some(r.pose(frame % r.len(), urdf_joints))
+    }
+
+    /// A clone of the loaded rollout, for saving.
+    pub fn snapshot(&self) -> Option<Rollout> {
+        self.0.lock().ok()?.as_ref().cloned()
+    }
+
+    /// Replace the rollout with one loaded from disk.
+    pub fn load_json(&self, text: &str) -> bool {
+        match parse_rollout(text) {
+            Some(r) if !r.is_empty() => {
+                self.set(Some(r));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The floating base at `frame`, as `[x, y, z, qx, qy, qz, qw]`.
+    pub fn base(&self, frame: usize) -> Option<[f32; 7]> {
+        let g = self.0.lock().ok()?;
+        let r = g.as_ref()?;
+        if r.is_empty() {
+            return None;
+        }
+        r.base.get(frame % r.len()).copied()
     }
 
     pub fn len(&self) -> usize {
@@ -275,6 +368,43 @@ fn strip_comments(text: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+impl Rollout {
+    /// Serialise in the same shape `parse_rollout` reads, so a recording and a
+    /// fresh `biped_drive` rollout load through one path. Only the fields this
+    /// app uses are kept — the body-position `frames` array is by far the
+    /// largest and nothing here reads it.
+    pub fn to_json(&self) -> String {
+        let names: Vec<String> = self.joint_names.iter().map(|n| format!("\"{n}\"")).collect();
+        let rows = |v: &[Vec<f32>]| -> String {
+            v.iter()
+                .map(|r| {
+                    let cells: Vec<String> = r.iter().map(|x| format!("{x:.5}")).collect();
+                    format!("[{}]", cells.join(","))
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let base: Vec<String> = self
+            .base
+            .iter()
+            .map(|b| {
+                let cells: Vec<String> = b.iter().map(|x| format!("{x:.5}")).collect();
+                format!("[{}]", cells.join(","))
+            })
+            .collect();
+        let resets: Vec<String> = self.resets.iter().map(|r| r.to_string()).collect();
+        format!(
+            "{{\n  \"dt\": {:.4},\n  \"joint_names\": [{}],\n  \"resets\": [{}],\n  \
+             \"base\": [{}],\n  \"joints\": [{}]\n}}\n",
+            self.dt,
+            names.join(", "),
+            resets.join(","),
+            base.join(","),
+            rows(&self.joints),
+        )
+    }
 }
 
 /// Read the fields this app needs out of zealot's rollout JSON.
@@ -399,6 +529,126 @@ fn array2d(text: &str, key: &str) -> Option<Vec<Vec<f32>>> {
 
 /// Start a zealot run. `None` when the binary is absent, so the caller can fall
 /// back to the built-in trainer rather than presenting a dead screen.
+/// Train across a *set* of scenes, one after another, resuming each time.
+///
+/// zealot's knobs are scalars, not distributions — `BIPED_FRICTION=0.6` fixes
+/// one value for the whole process — so a set cannot be expressed as a single
+/// run. What makes the sequence a curriculum rather than N unrelated runs is
+/// that zealot resumes from the checkpoint when the file already exists: the
+/// policy carries across scene boundaries and only the world changes.
+///
+/// Metrics are one continuous stream; `segment` on each sample says which
+/// scene produced it, so a curve can be read against the world it came from.
+pub fn spawn_curriculum(
+    scenes: Vec<(String, Vec<(&'static str, String)>)>,
+    envs: usize,
+    iters_each: u64,
+    rounds: usize,
+    ckpt: &str,
+) -> Option<Handle> {
+    let bin = binary_path();
+    if !bin.is_file() || scenes.is_empty() {
+        return None;
+    }
+    let shared = Arc::new(Mutex::new(Shared {
+        samples: Vec::new(),
+        running: true,
+        envs,
+        total_steps: 0,
+    }));
+    let (tx, rx) = mpsc::channel();
+    let s = Arc::clone(&shared);
+    let ckpt = ckpt.to_string();
+
+    // One slot the watcher can reach, re-filled as each segment starts, so a
+    // stop kills whichever child is currently running.
+    let current: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+    let watched = Arc::clone(&current);
+    let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_flag = Arc::clone(&stopped);
+    thread::spawn(move || {
+        let _ = rx.recv();
+        stop_flag.store(true, Ordering::Relaxed);
+        if let Ok(mut g) = watched.lock() {
+            if let Some(c) = g.as_mut() {
+                let _ = c.kill();
+            }
+        }
+    });
+
+    thread::spawn(move || {
+        let mut cumulative: u64 = 0;
+        'outer: for round in 0..rounds.max(1) {
+            for (name, knobs) in &scenes {
+                if stopped.load(Ordering::Relaxed) {
+                    break 'outer;
+                }
+                let mut c = Command::new(&bin);
+                c.arg(iters_each.to_string())
+                    .arg(envs.to_string())
+                    .arg(&ckpt)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null());
+                for (k, v) in knobs {
+                    c.env(k, v);
+                }
+                let Ok(mut child) = c.spawn() else { continue };
+                let Some(stdout) = child.stdout.take() else { continue };
+                if let Ok(mut g) = current.lock() {
+                    *g = Some(child);
+                }
+                eprintln!("curriculum: round {} · scene '{name}'", round + 1);
+
+                let mut pending = Row::default();
+                for line in BufReader::new(stdout).lines() {
+                    let Ok(line) = line else { break };
+                    if let Some(row) = parse_row(&line) {
+                        pending = row;
+                    } else if let Some(rb) = parse_rb(&line) {
+                        cumulative += rb.samples;
+                        let sample = Sample {
+                            step: cumulative,
+                            reward: pending.reward,
+                            terms: TERMS.iter().map(|t| rb.term(t)).collect(),
+                            fall_rate: if rb.samples > 0 {
+                                rb.fell as f32 / rb.samples as f32
+                            } else {
+                                0.0
+                            },
+                            steps_per_sec: if pending.secs > 0.0 {
+                                rb.samples as f64 / pending.secs
+                            } else {
+                                0.0
+                            },
+                            episode_len: 0.0,
+                            leans: Vec::new(),
+                        };
+                        if let Ok(mut g) = s.lock() {
+                            g.samples.push(sample);
+                            g.total_steps = cumulative;
+                            if g.samples.len() > 600 {
+                                g.samples.drain(0..100);
+                            }
+                        }
+                    }
+                }
+                if let Ok(mut g) = current.lock() {
+                    if let Some(c) = g.as_mut() {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
+                    *g = None;
+                }
+            }
+        }
+        if let Ok(mut g) = s.lock() {
+            g.running = false;
+        }
+    });
+
+    Some(Handle::external(shared, tx))
+}
+
 pub fn spawn(envs: usize, iters: u64, ckpt: &str) -> Option<Handle> {
     let bin = binary_path();
     if !bin.is_file() {
@@ -640,6 +890,28 @@ mod tests {
     /// spawn pose over and over. It looked upright, finite and plausible.
     /// Detecting that is what stops the sweep reporting numbers for a rollout
     /// that never tested anything.
+    #[test]
+    fn a_rollout_survives_a_save_and_load() {
+        let r = parse_rollout(ROLLOUT).expect("rollout");
+        let back = parse_rollout(&r.to_json()).expect("reparse");
+        assert_eq!(back.joint_names, r.joint_names);
+        assert_eq!(back.len(), r.len());
+        assert!((back.dt - r.dt).abs() < 1e-6);
+        assert!((back.base[2][0] - r.base[2][0]).abs() < 1e-4);
+        assert!((back.joints[2][3] - r.joints[2][3]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_saved_rollout_keeps_its_resets() {
+        // Otherwise a replayed recording would lose the one field that says
+        // whether the policy was actually standing up.
+        let src = ROLLOUT.replace(r#""resets": [],"#, r#""resets": [0, 1],"#);
+        let r = parse_rollout(&src).expect("rollout");
+        let back = parse_rollout(&r.to_json()).expect("reparse");
+        assert_eq!(back.resets, vec![0, 1]);
+        assert!(back.collapsed());
+    }
+
     #[test]
     fn a_rollout_that_resets_every_step_is_collapsed() {
         let healthy = parse_rollout(ROLLOUT).expect("rollout");
