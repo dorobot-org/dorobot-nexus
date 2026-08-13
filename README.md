@@ -10,34 +10,56 @@ at all. Every other trainer in this space is a headless job plus a browser tab
 and cannot offer them at any price.
 
 It is a sibling to [DoRobot Studio](https://github.com/dorobot-org/dorobot-studio),
-not a mode inside it. They share a visual language and two widget crates; they do
-not share a codebase, because they have two operators. One runs a robot for
-minutes with their hands on it. The other trains a policy for hours with their
-hands off.
+not a mode inside it. They share a visual language crate; they do not share a
+codebase, because they have two operators. One runs a robot for minutes with
+their hands on it. The other trains a policy for hours with their hands off.
 
 ---
+
+## One engine, two consoles
+
+    crates/nexus-engine    the engine — the learner, the environment,
+                           checkpoints, the sweep, sim-to-sim, the probe,
+                           and the headless CLI. Zero dependencies.
+    crates/nexus-app       the original six screens.
+    crates/nexus-studio    the lifecycle console: eight workspaces, ported
+                           from the approved web mockup.
+
+The arrow points one way. Everything that computes lives in the engine and
+neither console can be depended on from it, so a capability a console needs is
+added to the engine and called — never reimplemented upstairs. The two consoles
+are peers over the same physics in the same process: they are not two versions
+of one app, and neither supersedes the other.
+
+**The engine has no dependencies.** Not few — none. That is what lets other
+products consume its artifact schema without inheriting a UI stack, and it is
+why the headless surfaces live in the engine rather than in a console: they are
+pure std, so both consoles inherit them and a script gets them without starting
+a GUI at all.
 
 ## Quick start
 
 ```bash
 tools/fetch_robot_meshes.py g1     # 20 MB, once — meshes are fetched, not committed
-cargo run --release                # the studio, with a live run in progress
+cargo run --release -p nexus-app      # the original console, live run in progress
+cargo run --release -p nexus-studio   # the lifecycle console
 ```
 
-That needs nothing but a Rust toolchain. It launches the built-in CPU learner,
-which trains while you watch.
+`nexus-app` needs nothing but a Rust toolchain. It launches the built-in CPU
+learner, which trains while you watch. `nexus-studio` additionally needs the
+`dorobot-studio` checkout beside this one, for the shared `dorobot-ux` crate.
 
 ```bash
-cargo run --release -- --headless 2000000   # train without a window
-cargo run --release -- --sweep              # print the robustness surface as text
-cargo run --release -- --track-check        # does the policy respond to its command?
+cargo run --release -p nexus-app -- --headless 2000000   # train without a window
+cargo run --release -p nexus-app -- --sweep              # print the robustness surface as text
+cargo run --release -p nexus-app -- --track-check        # does the policy respond to its command?
 ```
 
 ### With the zealot GPU backend
 
 ```bash
 ./scripts/setup-zealot.sh                   # clones + builds the GPU stack (slow, once)
-cargo run --release --features zealot       # same studio, GPU biped behind it
+cargo run --release -p nexus-app --features zealot       # same studio, GPU biped behind it
 ```
 
 `setup-zealot.sh` clones seven upstream repos at pinned revisions, installs the
@@ -59,8 +81,8 @@ screen", and `zealot.rs` is that swap.
 | | **CPU learner** (default) | **zealot GPU** (`--features zealot`) |
 |---|---|---|
 | Task | balance + velocity tracking, inverted pendulum | Unitree G1 biped locomotion |
-| Physics | `src/env.rs`, vectorised, in-process | nexus on the GPU via khal → Metal/Vulkan/CUDA |
-| Learner | `src/rl.rs` — PPO/GAE/Adam, hand-rolled MLP | zealot's GPU PPO |
+| Physics | `crates/nexus-engine/src/env.rs`, vectorised, in-process | nexus on the GPU via khal → Metal/Vulkan/CUDA |
+| Learner | `crates/nexus-engine/src/rl.rs` — PPO/GAE/Adam, hand-rolled MLP | zealot's GPU PPO |
 | Throughput | ~40k env-steps/s, 256 envs | ~1.9k samples/s, 256 envs |
 | Linked how | compiled in | **subprocess**, parsed from stdout |
 | Dependencies added | — | **none** |
@@ -197,8 +219,8 @@ Changing it means replacing the visual, not the data source.
 ## What is real
 
 **The learners.** PPO/GAE/Adam with a hand-rolled MLP and explicit backward
-passes (`src/rl.rs`, gradient-checked against finite differences); a vectorised
-environment (`src/env.rs`); a seeded reproducible RNG (`src/rng.rs`); the
+passes (`crates/nexus-engine/src/rl.rs`, gradient-checked against finite differences); a vectorised
+environment (`crates/nexus-engine/src/env.rs`); a seeded reproducible RNG (`crates/nexus-engine/src/rng.rs`); the
 trainer on its own thread publishing snapshots over a channel. 44 tests, 46
 with the zealot backend compiled in.
 
@@ -408,30 +430,40 @@ full of plausible numbers that measure nothing is worse than an empty one.
 ## Layout
 
 ```
-src/ux.rs          design tokens, chrome, nav rail
-src/plot.rs        multi-series line plot widget
-src/rl.rs          PPO, GAE, Adam, MLP with explicit backward (tested)
-src/env.rs         vectorised balance-and-track environment (tested)
-src/rng.rs         seeded reproducible RNG (tested)
-src/trainer.rs     the training thread and its metric channel
-src/zealot.rs      the zealot backend: subprocess, metric parsing, rollouts (tested)
-src/ckpt.rs        checkpoint blobs + manifests (tested)
-src/probe.rs       deterministic rollout with push/scrub (tested)
-src/sweep.rs       robustness surface, CPU and zealot (tested)
-src/crosssim.rs    sim-to-sim comparison, CPU and zealot (tested)
-src/state.rs       run model + the diagnosis catalogue (tested)
-src/screens/       the six surfaces
+crates/nexus-engine/       the engine — no dependencies
+  src/rl.rs                PPO, GAE, Adam, MLP with explicit backward (tested)
+  src/env.rs               vectorised balance-and-track environment (tested)
+  src/rng.rs               seeded reproducible RNG (tested)
+  src/trainer.rs           the training thread and its metric channel
+  src/zealot.rs            the zealot backend: subprocess, metrics, rollouts (tested)
+  src/ckpt.rs              checkpoint blobs + manifests (tested)
+  src/scene.rs             the artifact schema other products consume
+  src/probe.rs             deterministic rollout with push/scrub (tested)
+  src/sweep.rs             robustness surface, CPU and zealot (tested)
+  src/crosssim.rs          sim-to-sim comparison, CPU and zealot (tested)
+  src/json.rs              the one-object-per-line emitter (tested)
+  src/cli.rs               the headless surfaces both consoles inherit (tested)
+
+crates/nexus-app/          the original console
+  src/ux.rs                design tokens, chrome, nav rail
+  src/plot.rs              multi-series line plot widget
+  src/state.rs             run model + the diagnosis catalogue (tested)
+  src/screens/             the six surfaces
+
+crates/nexus-studio/       the lifecycle console — eight workspaces
+crates/makepad-plot/       plot widgets, used by nexus-studio
+
 scripts/           setup-zealot.sh
 patches/           the nexus Metal fix, applied not forked
-docs/              the Metal root-cause write-up
+docs/              the Metal root-cause write-up, the wiring plan, the mockup
 data/g1/           Unitree G1 URDF (BSD-3-Clause, Unitree Robotics)
 ```
 
 ## Tests
 
 ```bash
-cargo test                     # 44 tests
-cargo test --features zealot   # 46 — adds the zealot parsers
+cargo test --workspace                          # 88 tests
+cargo test --workspace --features nexus-app/zealot   # 90 — adds the zealot parsers
 ```
 
 The zealot parsers are tested against **verbatim** output captured from real
@@ -451,7 +483,7 @@ exactly as much as its fidelity to the real thing.
 ## Credits
 
 [zealot](https://github.com/haixuanTao/zealot) is the training stack this is a
-console for, and `src/rl.rs` implements the same algorithm its `zealot-rl`
+console for, and `crates/nexus-engine/src/rl.rs` implements the same algorithm its `zealot-rl`
 implements on the GPU (itself a port of rsl_rl);
 [nexus](https://github.com/dimforge/nexus) is the physics engine underneath it.
 The G1 model is from

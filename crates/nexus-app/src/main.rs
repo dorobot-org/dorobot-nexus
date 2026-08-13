@@ -235,7 +235,7 @@ impl App {
 
     #[cfg(feature = "zealot")]
     fn zealot_ckpt(&self) -> String {
-        zealot_ckpt_path()
+        nexus_engine::cli::zealot_ckpt_path()
     }
 
     /// Repaint every screen from the current snapshot.

@@ -11,7 +11,7 @@
 
 // `zealot` is always compiled — it is pure std, and the feature decides whether
 // a console prefers that backend, not whether the client exists.
-use crate::{ckpt, crosssim, env, json, probe, rng, sweep, trainer, zealot};
+use crate::{ckpt, crosssim, env, json, probe, rng, scene, sweep, trainer, zealot};
 
 /// Did the caller ask for machine-readable output?
 ///
@@ -288,7 +288,7 @@ fn run_arg(args: &[String], i: usize) -> String {
 /// Live only in zealot builds, like the module it names — same reason
 /// `mod zealot` carries the attribute rather than being `#[cfg]`-gated.
 #[allow(dead_code)]
-fn zealot_ckpt_path() -> String {
+pub fn zealot_ckpt_path() -> String {
     std::env::var("DOROBOT_ZEALOT_CKPT").unwrap_or_else(|_| "dorobot_nexus.safetensors".to_string())
 }
 
