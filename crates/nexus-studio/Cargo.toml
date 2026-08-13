@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "nexus-studio",
+    "crates/makepad-plot",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["dorobot team"]
+
+[workspace.dependencies]
+# The shared visual language: tokens + the custom-drawn widget kit. It lives in
+# the dorobot-studio repository because the teleop and dataset tools depend on
+# it too — it is the one thing the two product lines still share, and it is kept
+# deliberately lineage-neutral so that stays true.
+#
+# A sibling path while `crates/dorobot-ux` is unpushed. Once dorobot-studio has
+# published it, replace this with the git rev and the repo builds from a bare
+# clone:
+#   dorobot-ux = { git = "https://github.com/dorobot-org/dorobot-studio", rev = "<sha>" }
+dorobot-ux = { path = "../dorobot-studio/crates/dorobot-ux" }
+
+# Makepad
+makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev" }
+
+rfd = "0.15"

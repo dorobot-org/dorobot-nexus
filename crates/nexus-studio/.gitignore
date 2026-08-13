@@ -1,0 +1,36 @@
+# Build artifacts
+**/target/
+**/*.rs.bk
+**/out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dataset files (large binary data)
+/dataset/*
+# Allow specific datasets as submodules
+!/dataset/aloha_mobile_cabinet
+
+# Debug logs
+*.log
+/tmp/
+
+# Cargo lock for libraries (optional, keep for binaries)
+# Cargo.lock
+
+# VQA capture output (goldens are tracked, transient shots are not)
+tools/vqa/out/
+dataset/
+
+# Robot meshes are fetched, not committed: see tools/fetch_robot_meshes.py
+data/g1/meshes/
+
+# Tool caches
+**/.lafan1-cache/
