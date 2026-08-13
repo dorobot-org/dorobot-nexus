@@ -8,6 +8,9 @@ license = "MIT"
 [dependencies]
 makepad-widgets = { workspace = true }
 makepad-plot = { path = "../crates/makepad-plot" }
+# The artifact-schema library — scenes/recordings — consumed at the boundary
+# dorobot-nexus itself declares. No app features: this pulls zero deps.
+dorobot-nexus = { git = "https://github.com/dorobot-org/dorobot-nexus", rev = "5c78875", default-features = false }
 rfd = { workspace = true }
 objc = "0.2"
 makepad-urdf-player = { git = "https://github.com/dorobot-org/makepad-urdf-viewer", rev = "24bfa8f" }

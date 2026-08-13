@@ -446,7 +446,9 @@ pub fn modal_ok(app: &mut App, cx: &mut Cx) {
                     .set_title("Pick a robot description")
                     .add_filter("Robot description (URDF/XML/MJCF)", &["urdf", "xml", "mjcf"])
                     .add_filter("All files", &["*"])
-                    .set_directory("/Users/yuechen/home/makepad-urdf-viewer/data")
+                    .set_directory(std::env::var("MAKEPAD_URDF_DATA").unwrap_or_else(|_| {
+                        format!("{}/home/makepad-urdf-viewer/data", std::env::var("HOME").unwrap_or_default())
+                    }))
                     .pick_file();
                 if let Some(p) = picked {
                     app.st.wiz_file = Some(p.to_string_lossy().to_string());

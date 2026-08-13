@@ -651,7 +651,10 @@ impl Store {
                 id: "r1".into(), name: "Unitree G1-29dof".into(),
                 links: 39, joints: 38, movable: 29, mapped: 12, meshes: 35,
                 used_by: vec!["every scene".into()],
-                urdf: Some("/Users/yuechen/home/dorobot-nexus/data/g1/g1.urdf".into()),
+                urdf: {
+                    let p = format!("{}/data/g1/g1.urdf", crate::nexus::repo_dir());
+                    std::path::Path::new(&p).exists().then_some(p)
+                },
             }],
             runs,
             recordings: vec![Recording { id: "rec1".into(), name: "descend-62-001".into(), scene: "descend-62".into(), frames: 301, resets: 4, dist: 1.62, path: None }],

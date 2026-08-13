@@ -1360,7 +1360,7 @@ impl Store {
                     frames: r.frames as u32,
                     resets: r.resets as u32,
                     dist: r.distance as f64,
-                    path: Some(format!("{}/{}", crate::nexus::NEXUS_REPO, r.rollout.display())),
+                    path: Some(format!("{}/{}", crate::nexus::repo_dir(), r.rollout.display())),
                 });
             }
         }
