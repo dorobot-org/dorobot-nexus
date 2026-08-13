@@ -349,7 +349,7 @@ pub enum Knob {
 }
 
 impl Knob {
-    pub fn get(self, s: &crate::scene::Scene) -> f32 {
+    pub fn get(self, s: &nexus_engine::scene::Scene) -> f32 {
         match self {
             Knob::Friction => s.friction,
             Knob::KpScale => s.kp_scale,
@@ -362,7 +362,7 @@ impl Knob {
         }
     }
 
-    pub fn set(self, s: &mut crate::scene::Scene, v: f32) {
+    pub fn set(self, s: &mut nexus_engine::scene::Scene, v: f32) {
         match self {
             Knob::Friction => s.friction = v,
             Knob::KpScale => s.kp_scale = v,
@@ -557,7 +557,7 @@ impl SceneScreenRef {
     }
 
     /// Render the knobs from the scene they describe.
-    pub fn show_knobs(&self, cx: &mut Cx, sc: &crate::scene::Scene) {
+    pub fn show_knobs(&self, cx: &mut Cx, sc: &nexus_engine::scene::Scene) {
         let Some(mut inner) = self.borrow_mut() else { return };
         let root = &mut inner.view;
         for (knob, path, lo, hi) in Self::KNOBS {
@@ -617,8 +617,8 @@ impl SceneScreenRef {
     pub fn show_library(
         &self,
         cx: &mut Cx,
-        scenes: &[crate::scene::Scene],
-        recs: &[crate::scene::Recording],
+        scenes: &[nexus_engine::scene::Scene],
+        recs: &[nexus_engine::scene::Recording],
         active: &str,
     ) {
         let Some(mut inner) = self.borrow_mut() else { return };

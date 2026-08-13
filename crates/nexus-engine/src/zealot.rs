@@ -78,7 +78,7 @@ pub fn ensure_terrain_mesh(scene: &crate::scene::Scene) -> Option<PathBuf> {
     }
     let exporter = terrain_export_path();
     if !exporter.is_file() {
-        ::log::warn!("terrain: {} missing and no exporter to build it", path.display());
+        eprintln!("terrain: {} missing and no exporter to build it", path.display());
         return None;
     }
     // The exporter writes all four families for these parameters in one pass,
@@ -96,7 +96,7 @@ pub fn ensure_terrain_mesh(scene: &crate::scene::Scene) -> Option<PathBuf> {
         .map(|s| s.success())
         .unwrap_or(false);
     if !ok {
-        ::log::error!("terrain: export failed for {name}");
+        eprintln!("terrain: export failed for {name}");
         return None;
     }
     path.is_file().then_some(path)

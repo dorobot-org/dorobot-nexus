@@ -18,7 +18,25 @@ use crate::state::*;
 use crate::tokens::pal;
 use makepad_widgets::*;
 
-app_main!(App);
+/// makepad's `app_main!` generates the crate's `fn main`, and by the time that
+/// reaches our code it has already written to **stdout** via `Cx::init_log` and
+/// `init_websockets` — which would put framework chatter inside a JSON stream.
+/// Invoking it inside a module demotes that `main` to `shell::main`, leaving
+/// the real entry point below to dispatch the engine's headless flags first.
+///
+/// Both consoles do this, so `nexus-studio --sweep` and `dorobot-nexus --sweep`
+/// are the same run: the surfaces live in the engine, not in either UI.
+#[allow(dead_code)]
+mod shell {
+    use super::*;
+    app_main!(App);
+}
+
+fn main() {
+    // Never returns if a headless flag was given.
+    nexus_engine::cli::maybe_headless();
+    shell::app_main();
+}
 
 script_mod! {
     use mod.prelude.widgets.*

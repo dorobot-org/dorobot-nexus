@@ -2,8 +2,8 @@
 
 use makepad_widgets::*;
 
-use crate::crosssim::Report;
-use crate::sweep::{self, Surface};
+use nexus_engine::crosssim::Report;
+use nexus_engine::sweep::{self, Surface};
 use crate::ux;
 
 /// What the two axes varied. A sweep that names someone else's axes is worse

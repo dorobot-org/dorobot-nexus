@@ -11,26 +11,14 @@
 
 use makepad_widgets::*;
 
-mod ckpt;
-mod crosssim;
-mod env;
-mod json;
 mod plot;
-mod probe;
 mod screens;
-mod rl;
-mod rng;
-mod scene;
 mod state;
-mod sweep;
-mod trainer;
 mod ux;
-/// Always compiled — it is pure std and pulls in nothing. The `zealot` feature
-/// decides whether the app *prefers* this backend, not whether it exists; that
-/// keeps the state it owns out of `#[cfg]` on `App`'s fields, which the Script
-/// derive does not accept.
-#[allow(dead_code)]
-mod zealot;
+
+// The engine is a dependency now, not a set of sibling modules. Everything
+// that computes lives in `nexus-engine`; this crate only draws it.
+use nexus_engine::{crosssim, probe, scene, sweep, trainer, zealot};
 
 use screens::{
     inspect::InspectScreenWidgetRefExt, runs::RunsScreenWidgetRefExt,
@@ -44,9 +32,6 @@ use ux::Screen;
 use scene::Scene;
 use zealot::RolloutSlot;
 
-/// Playback tick, in seconds. 30 Hz: smooth enough for a gait, and cheap
-/// beside the metric poll.
-const ANIM_TICK: f32 = 0.033;
 
 /// makepad's `app_main!` generates the crate's `fn main`, and by the time that
 /// hands control to our code it has already run `Cx::init_log` and
@@ -67,7 +52,7 @@ mod shell {
 
 fn main() {
     // Never returns if a headless flag was given.
-    maybe_headless();
+    nexus_engine::cli::maybe_headless();
     shell::app_main();
 }
 
@@ -664,77 +649,5 @@ impl AppMain for App {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
         self.match_event(cx, event);
         self.ui.handle_event(cx, event, &mut Scope::empty());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_sample_names_its_reward_terms() {
-        // `Sample::terms` is positional. Pairing it with TERM_NAMES at the edge
-        // means a consumer never has to know the order, and a reweighting
-        // cannot silently relabel a column.
-        let s = trainer::Sample {
-            step: 8192,
-            reward: 0.5,
-            terms: vec![0.1, 0.2, 0.3, 0.4],
-            fall_rate: 0.25,
-            steps_per_sec: 60000.0,
-            episode_len: 24.0,
-            leans: vec![],
-        };
-        let out = sample_json(&s);
-        assert!(out.contains(r#""event":"sample""#));
-        assert!(out.contains(r#""step":8192"#));
-        assert!(out.contains(r#""track_lin_vel":0.10000"#), "{out}");
-        assert!(out.contains(r#""torque":0.40000"#), "{out}");
-    }
-
-    #[test]
-    fn a_sample_with_fewer_terms_than_names_omits_rather_than_invents() {
-        // A checkpoint from an older reward shape must not have its missing
-        // terms reported as zero — an absent term and a zero term differ.
-        let s = trainer::Sample { terms: vec![0.1], ..Default::default() };
-        let out = sample_json(&s);
-        assert!(out.contains("track_lin_vel"));
-        assert!(!out.contains("torque"), "{out}");
-    }
-
-    #[test]
-    fn a_non_finite_metric_does_not_break_the_stream() {
-        // A diverged run produces NaN. Emitting the literal `NaN` would make the
-        // line unparseable, taking the whole stream down with it.
-        let s = trainer::Sample { reward: f32::NAN, ..Default::default() };
-        assert!(sample_json(&s).contains(r#""reward":null"#));
-    }
-
-    #[test]
-    fn a_flag_is_never_read_as_a_run_id() {
-        // `--probe --json` must probe the default run, not a run called "--json".
-        let args: Vec<String> = ["dorobot-nexus", "--probe", "--json"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        assert_eq!(run_arg(&args, 1), trainer::RUN_ID);
-    }
-
-    #[test]
-    fn an_explicit_run_id_is_taken() {
-        let args: Vec<String> = ["dorobot-nexus", "--probe", "other-run", "--json"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        assert_eq!(run_arg(&args, 1), "other-run");
-    }
-
-    #[test]
-    fn a_trailing_flag_falls_back_to_the_default_run() {
-        let args: Vec<String> = ["dorobot-nexus", "--crosssim"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        assert_eq!(run_arg(&args, 1), trainer::RUN_ID);
     }
 }

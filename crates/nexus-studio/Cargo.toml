@@ -1,29 +1,24 @@
-[workspace]
-resolver = "2"
-members = [
-    "nexus-studio",
-    "crates/makepad-plot",
-]
+[package]
+name = "nexus-studio"
+description = "The lifecycle console: makepad port of the approved dorobot-nexus mockup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
-[workspace.package]
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-authors = ["dorobot team"]
+[[bin]]
+name = "nexus-studio"
+path = "src/main.rs"
 
-[workspace.dependencies]
-# The shared visual language: tokens + the custom-drawn widget kit. It lives in
-# the dorobot-studio repository because the teleop and dataset tools depend on
-# it too — it is the one thing the two product lines still share, and it is kept
-# deliberately lineage-neutral so that stays true.
-#
-# A sibling path while `crates/dorobot-ux` is unpushed. Once dorobot-studio has
-# published it, replace this with the git rev and the repo builds from a bare
-# clone:
-#   dorobot-ux = { git = "https://github.com/dorobot-org/dorobot-studio", rev = "<sha>" }
-dorobot-ux = { path = "../dorobot-studio/crates/dorobot-ux" }
+[dependencies]
+# The engine, linked rather than spawned: this console and nexus-app draw the
+# same physics in the same process.
+nexus-engine = { workspace = true }
+makepad-widgets = { workspace = true }
+makepad-plot = { path = "../makepad-plot" }
+dorobot-ux = { workspace = true }
+makepad-urdf-player = { workspace = true }
+rfd = { workspace = true }
+objc = "0.2"
 
-# Makepad
-makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev" }
-
-rfd = "0.15"
+[features]
+zealot = ["nexus-engine/zealot"]

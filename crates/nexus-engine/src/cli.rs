@@ -9,10 +9,9 @@
 //! emits one object per line. That stream is the contract other products read;
 //! the fixed-width text beside it exists for humans and is free to change.
 
-#[cfg(feature = "zealot")]
-use crate::zealot;
-
-use crate::{ckpt, crosssim, env, json, probe, rng, sweep, trainer};
+// `zealot` is always compiled — it is pure std, and the feature decides whether
+// a console prefers that backend, not whether the client exists.
+use crate::{ckpt, crosssim, env, json, probe, rng, sweep, trainer, zealot};
 
 /// Did the caller ask for machine-readable output?
 ///
@@ -583,7 +582,7 @@ fn headless_curriculum(iters_each: u64, rounds: usize) -> ! {
     std::process::exit(0);
 }
 
-fn maybe_headless() {
+pub fn maybe_headless() {
     let args: Vec<String> = std::env::args().collect();
     // First, because it is the flag a caller uses to discover the others and it
     // must work on a build where everything else is unavailable.
@@ -611,5 +610,77 @@ fn maybe_headless() {
     if let Some(i) = args.iter().position(|a| a == "--headless") {
         let n: u64 = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(2_000_000);
         headless(n);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_sample_names_its_reward_terms() {
+        // `Sample::terms` is positional. Pairing it with TERM_NAMES at the edge
+        // means a consumer never has to know the order, and a reweighting
+        // cannot silently relabel a column.
+        let s = trainer::Sample {
+            step: 8192,
+            reward: 0.5,
+            terms: vec![0.1, 0.2, 0.3, 0.4],
+            fall_rate: 0.25,
+            steps_per_sec: 60000.0,
+            episode_len: 24.0,
+            leans: vec![],
+        };
+        let out = sample_json(&s);
+        assert!(out.contains(r#""event":"sample""#));
+        assert!(out.contains(r#""step":8192"#));
+        assert!(out.contains(r#""track_lin_vel":0.10000"#), "{out}");
+        assert!(out.contains(r#""torque":0.40000"#), "{out}");
+    }
+
+    #[test]
+    fn a_sample_with_fewer_terms_than_names_omits_rather_than_invents() {
+        // A checkpoint from an older reward shape must not have its missing
+        // terms reported as zero — an absent term and a zero term differ.
+        let s = trainer::Sample { terms: vec![0.1], ..Default::default() };
+        let out = sample_json(&s);
+        assert!(out.contains("track_lin_vel"));
+        assert!(!out.contains("torque"), "{out}");
+    }
+
+    #[test]
+    fn a_non_finite_metric_does_not_break_the_stream() {
+        // A diverged run produces NaN. Emitting the literal `NaN` would make the
+        // line unparseable, taking the whole stream down with it.
+        let s = trainer::Sample { reward: f32::NAN, ..Default::default() };
+        assert!(sample_json(&s).contains(r#""reward":null"#));
+    }
+
+    #[test]
+    fn a_flag_is_never_read_as_a_run_id() {
+        // `--probe --json` must probe the default run, not a run called "--json".
+        let args: Vec<String> = ["dorobot-nexus", "--probe", "--json"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(run_arg(&args, 1), trainer::RUN_ID);
+    }
+
+    #[test]
+    fn an_explicit_run_id_is_taken() {
+        let args: Vec<String> = ["dorobot-nexus", "--probe", "other-run", "--json"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(run_arg(&args, 1), "other-run");
+    }
+
+    #[test]
+    fn a_trailing_flag_falls_back_to_the_default_run() {
+        let args: Vec<String> = ["dorobot-nexus", "--crosssim"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(run_arg(&args, 1), trainer::RUN_ID);
     }
 }

@@ -56,7 +56,7 @@ impl Probe {
         if !ppo.load_weights(&weights) {
             // A shape mismatch means the manifest and the blob disagree; a
             // silently mis-loaded policy is worse than no policy.
-            ::log::error!("probe: {} does not match its manifest", path.display());
+            eprintln!("probe: {} does not match its manifest", path.display());
             return None;
         }
         let mut p = Self {

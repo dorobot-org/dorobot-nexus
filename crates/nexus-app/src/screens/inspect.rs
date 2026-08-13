@@ -285,7 +285,7 @@ pub enum Transport {
 }
 
 impl InspectScreenRef {
-    pub fn sync(&self, cx: &mut Cx, probe: Option<&crate::probe::Probe>) {
+    pub fn sync(&self, cx: &mut Cx, probe: Option<&nexus_engine::probe::Probe>) {
         let Some(mut inner) = self.borrow_mut() else { return };
         let root = &mut inner.view;
 

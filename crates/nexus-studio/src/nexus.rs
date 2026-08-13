@@ -10,7 +10,7 @@ use std::sync::mpsc::{channel, Receiver};
 
 /// dorobot-nexus's artifact-schema library (scenes, recordings) — the
 /// dependency-free lib target it exposes for exactly this purpose.
-pub use dorobot_nexus::scene;
+pub use nexus_engine::scene;
 
 /// The dorobot-nexus checkout this studio operates on. Override with
 /// DOROBOT_NEXUS_DIR; defaults to the sibling checkout layout.

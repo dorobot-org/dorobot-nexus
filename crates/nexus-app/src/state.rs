@@ -10,8 +10,8 @@
 
 use std::path::PathBuf;
 
-use crate::env::{TERM_NAMES, TERM_WEIGHTS};
-use crate::trainer::Sample;
+use nexus_engine::env::{TERM_NAMES, TERM_WEIGHTS};
+use nexus_engine::trainer::Sample;
 
 /// A reward term, named so it can be blamed individually.
 #[derive(Clone, Debug)]
@@ -299,7 +299,7 @@ pub fn live_run(samples: &[Sample], envs: u32, total_steps: u64, seed: u64) -> R
         throughput: samples.iter().map(|s| s.steps_per_sec / 1000.0).collect(),
         // Read from disk, so the rail lists artifacts that exist rather than
         // intervals that happened.
-        checkpoints: crate::ckpt::list(crate::trainer::RUN_ID)
+        checkpoints: nexus_engine::ckpt::list(nexus_engine::trainer::RUN_ID)
             .into_iter()
             .take(6)
             .map(|(_, m)| Checkpoint { step: m.step, score: m.score })
