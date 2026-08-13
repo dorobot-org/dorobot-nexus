@@ -8,16 +8,27 @@ use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 
-/// dorobot-nexus's own scene module, included from its source tree.
-#[path = "/Users/yuechen/home/dorobot-nexus/src/scene.rs"]
-pub mod scene;
+/// dorobot-nexus's artifact-schema library (scenes, recordings) — the
+/// dependency-free lib target it exposes for exactly this purpose.
+pub use dorobot_nexus::scene;
 
-pub const NEXUS_REPO: &str = "/Users/yuechen/home/dorobot-nexus";
-pub const NEXUS_BIN: &str = "/Users/yuechen/home/dorobot-nexus/target/release/dorobot-nexus";
+/// The dorobot-nexus checkout this studio operates on. Override with
+/// DOROBOT_NEXUS_DIR; defaults to the sibling checkout layout.
+pub fn repo_dir() -> String {
+    std::env::var("DOROBOT_NEXUS_DIR").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{home}/home/dorobot-nexus")
+    })
+}
 
-/// Point the included module at the real library before anything reads it.
+/// The real trainer binary. Override with DOROBOT_NEXUS_BIN.
+pub fn bin_path() -> String {
+    std::env::var("DOROBOT_NEXUS_BIN").unwrap_or_else(|_| format!("{}/target/release/dorobot-nexus", repo_dir()))
+}
+
+/// Point the schema library at the real scene library before anything reads it.
 pub fn init_env() {
-    std::env::set_var("DOROBOT_SCENES_DIR", format!("{NEXUS_REPO}/scenes"));
+    std::env::set_var("DOROBOT_SCENES_DIR", format!("{}/scenes", repo_dir()))
 }
 
 // ------------------------------------------------------------- mapping --
@@ -89,12 +100,13 @@ pub struct DiskCkpt {
 /// Real checkpoint files in the dorobot-nexus repo, newest first.
 pub fn real_ckpts() -> Vec<DiskCkpt> {
     let mut out = vec![];
-    if let Ok(rd) = std::fs::read_dir(NEXUS_REPO) {
+    let repo = repo_dir();
+    if let Ok(rd) = std::fs::read_dir(&repo) {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
             if name.starts_with("dorobot_nexus.safetensors") || name == "curriculum.safetensors" {
                 let kb = e.metadata().map(|m| m.len() / 1024).unwrap_or(0);
-                out.push(DiskCkpt { label: name.clone(), path: format!("{NEXUS_REPO}/{name}"), kb });
+                out.push(DiskCkpt { label: name.clone(), path: format!("{repo}/{name}"), kb });
             }
         }
     }
@@ -199,14 +211,14 @@ pub enum ProcKind {
 }
 
 pub fn bin_exists() -> bool {
-    std::path::Path::new(NEXUS_BIN).exists()
+    std::path::Path::new(&bin_path()).exists()
 }
 
 /// Spawn the real dorobot-nexus binary and stream its stdout line by line.
 pub fn spawn(kind: ProcKind, args: &[&str]) -> std::io::Result<RealProc> {
-    let mut child = Command::new(NEXUS_BIN)
+    let mut child = Command::new(bin_path())
         .args(args)
-        .current_dir(NEXUS_REPO)
+        .current_dir(repo_dir())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -275,8 +287,15 @@ mod tests {
         assert!((back.kp - 1.2).abs() < 1e-6);
     }
 
+    fn have_repo() -> bool {
+        std::path::Path::new(&repo_dir()).exists()
+    }
+
     #[test]
     fn loads_real_scene_files() {
+        if !have_repo() {
+            return;
+        }
         init_env();
         let scenes = scene::list();
         // The repo ships flat-easy and rough-slippery.
@@ -285,11 +304,14 @@ mod tests {
 
     #[test]
     fn loads_real_recordings_and_rollout() {
+        if !have_repo() {
+            return;
+        }
         init_env();
         let recs = scene::Recording::list();
         assert!(!recs.is_empty());
         let r = &recs[0];
-        let path = std::path::Path::new(NEXUS_REPO).join(&r.rollout);
+        let path = std::path::Path::new(&repo_dir()).join(&r.rollout);
         let rp = load_rollout(&path, &r.name).expect("rollout parses");
         assert_eq!(rp.joints.len(), r.frames);
         assert_eq!(rp.joints[0].len(), rp.joint_names.len());
@@ -298,6 +320,9 @@ mod tests {
 
     #[test]
     fn real_ckpts_listed() {
+        if !have_repo() {
+            return;
+        }
         let c = real_ckpts();
         assert!(c.iter().any(|c| c.label.contains("safetensors")));
     }
