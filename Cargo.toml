@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 makepad-widgets = { workspace = true }
 makepad-plot = { path = "../crates/makepad-plot" }
+dorobot-ux = { workspace = true }
 rfd = { workspace = true }
 objc = "0.2"
 makepad-urdf-player = { git = "https://github.com/dorobot-org/makepad-urdf-viewer", rev = "24bfa8f" }

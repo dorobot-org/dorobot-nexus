@@ -31,8 +31,8 @@ pub fn sync_modal(app: &mut App, cx: &mut Cx) {
     // hide everything, then reveal per kind
     let hide_paths: [&[LiveId]; 26] = [
         ids!(panel.sub), ids!(panel.blast), ids!(panel.wsteps), ids!(panel.info),
-        ids!(panel.in_cap0), ids!(panel.input0), ids!(panel.in_cap1), ids!(panel.input1),
-        ids!(panel.in_cap2), ids!(panel.input2),
+        ids!(panel.in_cap0), ids!(panel.in_wrap0), ids!(panel.in_cap1), ids!(panel.in_wrap1),
+        ids!(panel.in_cap2), ids!(panel.in_wrap2),
         ids!(panel.opt0), ids!(panel.opt1), ids!(panel.opt2), ids!(panel.opt3),
         ids!(panel.opt4), ids!(panel.opt5), ids!(panel.opt6), ids!(panel.opt7),
         ids!(panel.chk0), ids!(panel.chk1), ids!(panel.chk2), ids!(panel.chk3), ids!(panel.chk4),
@@ -309,14 +309,19 @@ pub fn sync_modal(app: &mut App, cx: &mut Cx) {
         set_label(cx, &host, ids!(panel.info), i, l);
     }
     let icaps = [ids!(panel.in_cap0), ids!(panel.in_cap1), ids!(panel.in_cap2)];
-    let ifields = [ids!(panel.input0), ids!(panel.input1), ids!(panel.input2)];
+    // The wrapper carries visibility, the inner TextInput carries the text.
+    let iwraps = [ids!(panel.in_wrap0), ids!(panel.in_wrap1), ids!(panel.in_wrap2)];
+    let ifields = [
+        ids!(panel.in_wrap0.input0),
+        ids!(panel.in_wrap1.input1),
+        ids!(panel.in_wrap2.input2),
+    ];
     for (i, (capt, default)) in inputs.iter().enumerate() {
         host.widget(cx, icaps[i]).set_visible(cx, true);
         set_label(cx, &host, icaps[i], &caps(capt), l);
-        let ti = host.widget(cx, ifields[i]);
-        ti.set_visible(cx, true);
+        host.widget(cx, iwraps[i]).set_visible(cx, true);
         if fresh {
-            ti.set_text(cx, default);
+            host.widget(cx, ifields[i]).set_text(cx, default);
         }
     }
     let opaths = [
@@ -423,21 +428,21 @@ pub fn modal_ok(app: &mut App, cx: &mut Cx) {
             app.st.modal = AppModal::None;
         }
         AppModal::RenameSet => {
-            let name = host.widget(cx, ids!(panel.input0)).text();
+            let name = host.widget(cx, ids!(panel.in_wrap0.input0)).text();
             app.st.set_rename_yes(&name);
         }
         AppModal::Preflight => {
-            let name = host.widget(cx, ids!(panel.input0)).text();
+            let name = host.widget(cx, ids!(panel.in_wrap0.input0)).text();
             let name = if name.is_empty() { "crouch-v4".into() } else { name };
             let warm = ["Resume latest — ck-2100k", "From promoted — crouch-v2-final", "Fresh"][app.warm_sel.min(2)];
             app.st.launch(&name, warm);
         }
         AppModal::Rerun => {
-            let name = host.widget(cx, ids!(panel.input0)).text();
+            let name = host.widget(cx, ids!(panel.in_wrap0.input0)).text();
             app.st.rerun_yes(&name);
         }
         AppModal::PromoteCk { ck_id } => {
-            let name = host.widget(cx, ids!(panel.input0)).text();
+            let name = host.widget(cx, ids!(panel.in_wrap0.input0)).text();
             app.st.ck_promote_yes(&ck_id, &name);
         }
         AppModal::Wizard { step } => {
@@ -446,7 +451,7 @@ pub fn modal_ok(app: &mut App, cx: &mut Cx) {
                     .set_title("Pick a robot description")
                     .add_filter("Robot description (URDF/XML/MJCF)", &["urdf", "xml", "mjcf"])
                     .add_filter("All files", &["*"])
-                    .set_directory("/Users/yuechen/home/makepad-urdf-viewer/data")
+                    .set_directory(crate::nexus::NEXUS_REPO)
                     .pick_file();
                 if let Some(p) = picked {
                     app.st.wiz_file = Some(p.to_string_lossy().to_string());
@@ -460,9 +465,9 @@ pub fn modal_ok(app: &mut App, cx: &mut Cx) {
             }
         }
         AppModal::TargetForm { edit } => {
-            let name = host.widget(cx, ids!(panel.input0)).text();
-            let ipif = host.widget(cx, ids!(panel.input1)).text();
-            let capv = host.widget(cx, ids!(panel.input2)).text().trim().parse::<u32>().unwrap_or(70);
+            let name = host.widget(cx, ids!(panel.in_wrap0.input0)).text();
+            let ipif = host.widget(cx, ids!(panel.in_wrap1.input1)).text();
+            let capv = host.widget(cx, ids!(panel.in_wrap2.input2)).text().trim().parse::<u32>().unwrap_or(70);
             let (ip, iface) = match ipif.split_once('·') {
                 Some((a, b)) => (a.trim().to_string(), b.trim().to_string()),
                 None => (ipif.trim().to_string(), String::new()),

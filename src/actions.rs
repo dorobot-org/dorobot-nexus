@@ -1209,7 +1209,9 @@ impl Store {
     /// ~120ms: playback frames, gate/ping progress, sweep reveal, toast expiry.
     pub fn fast_tick(&mut self) {
         self.clock += 0.12;
-        if self.live.playing {
+        // A loaded rollout advances on its own 25 Hz timer, one frame at a
+        // time; stepping it here as well would play it at double speed.
+        if self.live.playing && !self.replay_driven {
             self.live.frame = (self.live.frame + 3) % self.live.frames.max(1);
         }
         self.gate_tick();

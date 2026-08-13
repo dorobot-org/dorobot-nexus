@@ -589,12 +589,27 @@ script_mod! {
             sub := mod.widgets.nx.BodyLbl{ visible: false }
             blast := mod.widgets.nx.Verdict{ visible: false }
             wsteps := mod.widgets.nx.MonoLbl{ visible: false }
+            // Each field is wrapped: TextInput carries no `visible` property in
+            // this makepad rev, so `set_visible` on it is a silent no-op and the
+            // field would draw in every modal — including the ones that ask for
+            // no input at all. The wrapper is a View, which does honour it.
+            // `empty_text` is blanked because makepad's default is the stock
+            // "Your text here", and the caption above already names the field.
             in_cap0 := mod.widgets.nx.Cap{ visible: false }
-            input0 := TextInput{ width: Fill text: "" }
+            in_wrap0 := View{
+                width: Fill height: Fit visible: false
+                input0 := TextInput{ width: Fill text: "" empty_text: "" }
+            }
             in_cap1 := mod.widgets.nx.Cap{ visible: false }
-            input1 := TextInput{ width: Fill text: "" }
+            in_wrap1 := View{
+                width: Fill height: Fit visible: false
+                input1 := TextInput{ width: Fill text: "" empty_text: "" }
+            }
             in_cap2 := mod.widgets.nx.Cap{ visible: false }
-            input2 := TextInput{ width: Fill text: "" }
+            in_wrap2 := View{
+                width: Fill height: Fit visible: false
+                input2 := TextInput{ width: Fill text: "" empty_text: "" }
+            }
             opt0 := mod.widgets.nx.NxRow{ visible: false }
             opt1 := mod.widgets.nx.NxRow{ visible: false }
             opt2 := mod.widgets.nx.NxRow{ visible: false }

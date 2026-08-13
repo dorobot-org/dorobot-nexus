@@ -539,6 +539,11 @@ pub struct Store {
     pub clock: f64, // seconds since start, advanced by the app tick
     pub dep_serial: u32,
     pub ping_tick_counter: u64,
+    /// A real rollout owns the playhead. The mock timeline steps 3 frames per
+    /// 120 ms tick, which is fine for a scrubber over invented data but shows
+    /// recorded motion at 8 updates a second — a walk delivered as a stutter.
+    /// When this is set, the replay timer advances the playhead instead.
+    pub replay_driven: bool,
 }
 
 impl Default for Store {
@@ -651,7 +656,7 @@ impl Store {
                 id: "r1".into(), name: "Unitree G1-29dof".into(),
                 links: 39, joints: 38, movable: 29, mapped: 12, meshes: 35,
                 used_by: vec!["every scene".into()],
-                urdf: Some("/Users/yuechen/home/dorobot-nexus/data/g1/g1.urdf".into()),
+                urdf: Some("/Users/ychen/home/dorobot/dorobot-nexus/data/g1/g1.urdf".into()),
             }],
             runs,
             recordings: vec![Recording { id: "rec1".into(), name: "descend-62-001".into(), scene: "descend-62".into(), frames: 301, resets: 4, dist: 1.62, path: None }],
@@ -707,6 +712,7 @@ impl Store {
             clock: 0.0,
             dep_serial: 1,
             ping_tick_counter: 0,
+            replay_driven: false,
         }
     }
 

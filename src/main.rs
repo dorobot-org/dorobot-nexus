@@ -5,10 +5,12 @@ pub mod actions;
 pub mod drive;
 pub mod nexus;
 pub mod i18n;
-pub mod kit;
 pub mod screens;
 pub mod state;
-pub mod tokens;
+/// Tokens and the widget kit moved to the shared `dorobot-ux` crate, which
+/// dorobot-studio draws with too. Re-exported under their old paths so the
+/// screens keep referring to `crate::tokens` / `crate::kit` unchanged.
+pub use dorobot_ux::{kit, tokens};
 
 use crate::i18n::{tr, trf};
 use crate::screens::{LSpec, RSpec};
@@ -207,6 +209,9 @@ pub struct App {
     fast_timer: Timer,
     #[rust]
     slow_timer: Timer,
+    /// Playhead for a loaded rollout, at the rate the data was written for.
+    #[rust]
+    replay_timer: Timer,
     #[rust]
     lmap: Vec<LSpec>,
     #[rust]
@@ -244,8 +249,7 @@ impl AppMain for App {
         makepad_widgets::script_mod(vm);
         makepad_urdf_player::makepad_xr::script_mod(vm);
         makepad_urdf_player::script_mod(vm);
-        crate::tokens::script_mod(vm);
-        crate::kit::script_mod(vm);
+        dorobot_ux::script_mod(vm);
         crate::screens::script_mod(vm);
         self::script_mod(vm)
     }
@@ -271,6 +275,18 @@ impl AppMain for App {
             self.st.train_tick();
             self.sync_slow(cx);
         }
+        // A real rollout owns its own playhead: one frame per 40 ms rather than
+        // the mock timeline's 3 frames per 120 ms, which delivered recorded
+        // motion as 8 visible updates a second.
+        if self.replay_timer.is_event(event).is_some()
+            && self.replay.is_some()
+            && self.st.live.playing
+            && matches!(self.st.mode, Mode::Scenes | Mode::Inspect)
+        {
+            self.st.live.frame = (self.st.live.frame + 1) % self.st.live.frames.max(1);
+            self.drive_replay(cx);
+            self.ui.redraw(cx);
+        }
         self.match_event(cx, event);
         self.ui.handle_event(cx, event, &mut Scope::empty());
     }
@@ -280,6 +296,9 @@ impl MatchEvent for App {
     fn handle_startup(&mut self, cx: &mut Cx) {
         self.fast_timer = cx.start_interval(0.12);
         self.slow_timer = cx.start_interval(1.1);
+        // 25 Hz: the rate tools/lafan1_to_rollout.py resamples motion to, so a
+        // recorded clip plays at 1.0x and one frame per tick keeps it smooth.
+        self.replay_timer = cx.start_interval(0.04);
         self.st.merge_disk();
         // Opt out of App Nap: backgrounded, macOS otherwise coalesces our
         // timers AND throttles our own threads (the waker included), parking
@@ -603,6 +622,7 @@ impl App {
                 self.st.sel_scene(id);
                 self.replay = None;
                 self.replay_map = None;
+                self.st.replay_driven = false;
                 self.st.resim();
             }
             LAct::SelRobot(id) => self.st.sel.robot = Some(id.clone()),
@@ -614,6 +634,7 @@ impl App {
                 self.st.replay(id);
                 self.replay = None;
                 self.replay_map = None;
+                self.st.replay_driven = false;
                 if let Some(rec) = self.st.recordings.iter().find(|r| &r.id == id) {
                     if let Some(p) = rec.path.clone() {
                         match crate::nexus::load_rollout(std::path::Path::new(&p), &rec.name) {
@@ -621,6 +642,7 @@ impl App {
                                 self.st.live.frames = rp.joints.len() as u32;
                                 self.st.live.frame = 0;
                                 self.replay = Some(rp);
+                                self.st.replay_driven = true;
                                 self.st.toast("real rollout loaded — driving the 3D robot".into());
                             }
                             None => self.st.toast("rollout file failed to parse".into()),

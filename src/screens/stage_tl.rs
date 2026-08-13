@@ -61,17 +61,19 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         let mut s = app.ui.view(cx, ids!(stage));
         script_apply_eval!(cx, s, { draw_bg +: { light: #(l as f64) } });
     }
-    // 3D URDF view in Robots mode when the selected robot has a file
-    let urdf_path = if app.st.mode == Mode::Robots {
-        app.st.sel.robot.as_ref()
-            .and_then(|id| app.st.robots.iter().find(|r| &r.id == id))
-            .and_then(|r| r.urdf.clone())
-    } else if app.replay.is_some() && matches!(app.st.mode, Mode::Scenes | Mode::Inspect) {
-        // a real rollout drives the real robot
-        app.st.robots.first().and_then(|r| r.urdf.clone())
-    } else {
-        None
-    };
+    // The real robot in every mode, not just Robots: the selected robot when
+    // one is picked, else the first that carries a URDF. A path that is not on
+    // disk is refused rather than shown as an empty stage, which leaves the
+    // schematic figure as the fallback and says so in a toast.
+    let urdf_path = app
+        .st
+        .sel
+        .robot
+        .as_ref()
+        .and_then(|id| app.st.robots.iter().find(|r| &r.id == id))
+        .and_then(|r| r.urdf.clone())
+        .or_else(|| app.st.robots.iter().find_map(|r| r.urdf.clone()))
+        .filter(|p| std::path::Path::new(p).is_file());
     let show_3d = urdf_path.is_some();
     {
         let wrapv = stage.view(cx, ids!(urdf_wrap));
@@ -82,9 +84,12 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         if !figv.is_empty() {
             figv.set_visible(cx, !show_3d);
         }
+        // The stance guides carry target-vs-actual height in numbers, so they
+        // stay over the real robot; only the robot inspector drops them, where
+        // there is no live height to guide against.
         let glv = stage.view(cx, ids!(glines));
         if !glv.is_empty() {
-            glv.set_visible(cx, !show_3d);
+            glv.set_visible(cx, app.st.mode != Mode::Robots);
         }
     }
     if let Some(path) = &urdf_path {
@@ -98,7 +103,17 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
                 match rv.load_robot(cx, path, &assets) {
                     Ok(()) => {
                         app.loaded_urdf = Some(path.clone());
-                        rv.set_animating(cx, true);
+                        // Deliberately NOT set_animating(true): the viewer's
+                        // built-in animation drives every joint from its own
+                        // independent sine (phase = t*1.4 + k*0.7, amplitude
+                        // half the joint's limit). It demonstrates that the
+                        // chain articulates, but it is not a gait — on a
+                        // humanoid it reads as the robot wiggling. Real motion
+                        // arrives through drive_replay(); with no rollout
+                        // loaded the robot holds its rest pose, which is an
+                        // honest "nothing is driving this" rather than motion
+                        // that means nothing.
+                        rv.set_animating(cx, false);
                     }
                     Err(e) => {
                         app.loaded_urdf = Some(path.clone()); // don't retry every sync
