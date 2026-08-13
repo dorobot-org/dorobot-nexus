@@ -1,5 +1,13 @@
 # nexus-studio ↔ dorobot-nexus: wiring plan
 
+> **Superseded in part.** This plan was written when the console was a separate
+> repository driving the engine over a process boundary. Both consoles now live
+> in this repo and **link** `nexus-engine` directly, so the problems that were
+> really process-boundary problems — P2, P3, P5, P6 — dissolve rather than get
+> fixed: there is no stream to parse, no child to kill, and no missing route.
+> What survives is P1/P4/P7 and the reasoning, which is why the document is
+> kept rather than deleted. Each item below is marked.
+
 Status: **the engine half of items 3, 5 and 7 is implemented.** Everything
 console-side is still proposed.
 Written 2026-08-13 against `dorobot-studio` @ `5f3a252` (3 behind `origin/main`)
@@ -51,6 +59,26 @@ an engine change rather than a console workaround.
 Two actions launch real work: `real-sweep` runs `dorobot-nexus --sweep`
 (`src/main.rs:833`), and `real-train` runs `dorobot-nexus --headless 2000000`
 (`:845`), both with the working directory set to the engine repo.
+
+## What the restructure changed
+
+The console used to spawn `dorobot-nexus` and read its stdout. It now depends on
+`nexus-engine` as a crate, in the same process, exactly as `nexus-app` always
+has. That single change settles most of this plan:
+
+| Problem | Was | Now |
+|---|---|---|
+| P2 run invisible while running | parse a stdout stream | read `Shared` off the trainer thread |
+| P3 run cannot be stopped | needs `child.kill()` | `Handle::stop()`, already in `trainer.rs` |
+| P5 Inspect asserts fake physics | two implementations | one `probe::Probe`, called directly |
+| P6 probe/crosssim unreachable | no CLI existed | direct calls; the CLI is a bonus |
+| P1 engine path hardcoded | **still real** | the console still resolves a *data* directory |
+| P4 run not parameterised | **still real** | pre-flight still passes no options |
+| P7 backend undetectable | **still real** | `zealot` is still a compile-time feature |
+
+The headless CLI keeps its value — scripting, CI, and reproducing a run without
+a window — but it is no longer the console's only route to the engine, and the
+JSON contract is no longer load-bearing for the UI.
 
 ## Capability coverage
 
@@ -308,27 +336,19 @@ Each is worth an upstream issue; (3) is a one-line fix using the formula
 
 ## Repository state
 
-Item 1 is **done**, and the repositories have since been separated, so the
-starting conditions this plan was written against no longer hold. `nexus-studio`
-is now its own repo beside `dorobot-nexus` — see the root README — carrying
-`nexus-studio/` and `crates/makepad-plot/` with their original per-file history.
-Upstream's schema-dependency commits are merged, so the `#[path]` include is
-gone and **zero hardcoded `/Users/` paths** remain in the crate.
+Everything now lives in `dorobot-nexus`, branch `two-uis-one-engine`:
+`crates/nexus-engine` (zero deps), `crates/nexus-app` (the six screens),
+`crates/nexus-studio` (the eight workspaces, moved in with its history), and
+`crates/makepad-plot`. 88 tests pass, 90 with the zealot feature; both binaries
+build and both windows open.
 
-- `dorobot-nexus`: branch `headless-entry-points` off `5c78875`, carrying the
-  engine half of items 3, 5 and 7 — `src/json.rs` (new), the new entry points in
-  `src/main.rs`, and the `mod shell` entry-point change from upstream defect 4.
-  Uncommitted; 70 tests pass (55 before), warning count unchanged at 40, and the
-  GUI still launches. It wants a PR the way `scene-lib` (#1) did.
-  `main` itself is untouched and still clean at `5c78875`.
+The standalone `nexus-studio` repository that existed briefly between the two
+restructures is now redundant — its content is here, with history. Delete it
+once you are satisfied this layout is the one you want.
 
-  Keep the repo clean in the sense that matters — *no long-lived uncommitted
-  drift and no restyle* — not *never change the engine*. The canonical-backend
-  rule means more will land there; each change gets its own branch and PR.
-- `dorobot-studio`: branch `lineage-split`, holding the `dorobot-ux` extraction,
-  the flex restyle, the viewer theme change, and the removal of the two crates
-  that moved into this repo. `main` untouched at `5f3a252`.
+`dorobot-studio` keeps branch `lineage-split`, holding the `dorobot-ux`
+extraction and the removal of the crates that moved out. Its `main` is untouched
+at `5f3a252`.
 
-**The one loose end:** none of the three branches is pushed. Until
-`dorobot-studio`'s lands, this repo's `dorobot-ux` dependency has to stay a
-sibling path rather than the git rev it should be.
+**The one loose end is unchanged:** nothing is pushed, so `dorobot-ux` is still
+a sibling path dependency rather than the git rev it should be.
