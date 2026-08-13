@@ -1,0 +1,15 @@
+[package]
+name = "nexus-engine"
+description = "The dorobot-nexus engine: learner, environment, artifacts, sweep, sim-to-sim, probe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Drives zealot's GPU biped trainer instead of the built-in CPU learner. It
+# adds no dependencies on purpose — zealot is a subprocess, not a crate — so
+# this flag only compiles the client that reads its metric stream, and a clean
+# clone still builds with nothing but a Rust toolchain.
+zealot = []
+
+# No [dependencies] section, and that is the point. See the crate docs.
