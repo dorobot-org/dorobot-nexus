@@ -501,12 +501,29 @@ impl MatchEvent for App {
             // 0.3 m/s matches what zealot_cross drives so the two arms are
             // comparable. 45 s is long enough for episodes to terminate — the
             // harness only records an attempt when one ends.
-            match crosssim::spawn_mujoco(&nexus_engine::cli::zealot_ckpt_path(), 0.3, 45) {
+            let ckpt = nexus_engine::cli::zealot_ckpt_path();
+            match crosssim::spawn_mujoco(&ckpt, 0.3, 45) {
                 Some(c) => self.cross = Some(c),
                 None => ::log::info!(
                     "MuJoCo: {}",
                     nexus_engine::mujoco::why_unavailable().unwrap_or_default()
                 ),
+            }
+            // Also replay what MuJoCo simulated, into the same slot a zealot
+            // rollout uses. The numbers say whether the policy transferred; the
+            // motion says *how* it failed, and a fall at 1 s looks nothing like
+            // a policy that stands still.
+            if nexus_engine::mujoco::available() {
+                let out = self.rollout.clone();
+                self.rollout_frame = 0;
+                out.set(None);
+                std::thread::spawn(move || {
+                    out.set(nexus_engine::mujoco::drive(&ckpt, 0.3, 45));
+                    match out.len() {
+                        0 => eprintln!("mujoco: rollout failed"),
+                        n => eprintln!("mujoco: rollout loaded, {n} frames"),
+                    }
+                });
             }
             dirty = true;
         }

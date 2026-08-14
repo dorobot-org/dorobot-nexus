@@ -490,6 +490,22 @@ fn headless_mujoco(ckpt: &str) -> ! {
                     "\ncommanded {cmd_vx:.2} m/s · achieved {:.3} · survival {:.0}% · falls {:.0}%",
                     r.achieved_vx(), s.survival * 100.0, s.fall_rate * 100.0
                 );
+                // --replay also fetches the motion, not just the score, and
+                // reports what the viewer would get. Proves the rollout round
+                // trips through the schema rather than only asserting it does.
+                if std::env::args().any(|a| a == "--replay") {
+                    match crate::mujoco::drive(ckpt, cmd_vx, seconds) {
+                        Some(roll) => println!(
+                            "replay: {} frames · dt {:.3} · {} joints · travelled {:.2} m",
+                            roll.base.len(),
+                            roll.dt,
+                            roll.joint_names.len(),
+                            roll.base.last().map(|b| b[0]).unwrap_or(0.0)
+                                - roll.base.first().map(|b| b[0]).unwrap_or(0.0),
+                        ),
+                        None => println!("replay: no rollout produced"),
+                    }
+                }
             }
             std::process::exit(0);
         }

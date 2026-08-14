@@ -247,6 +247,52 @@ pub fn evaluate(policy: &str, command_vx: f32, seconds: u32) -> Result<Report, S
     Ok(r)
 }
 
+/// Run the harness and return the rollout MuJoCo actually simulated.
+///
+/// Mirrors [`crate::zealot::drive`] so the viewer path is identical: a worker
+/// thread calls this, drops the result into the same `RolloutSlot`, and the
+/// URDF view replays it. The difference is only which engine produced the
+/// motion — which is the entire point of showing it.
+///
+/// The harness writes the rollout in this project's own schema (see
+/// `S2S_ROLLOUT_JSON` in the patch), so it is read back with
+/// [`crate::zealot::parse_rollout`] rather than a second parser. It reorders
+/// the quaternion on the way out: MuJoCo stores `(w,x,y,z)` and the schema is
+/// `(x,y,z,w)`, and getting that wrong renders as a robot lying on its side
+/// rather than as an error.
+pub fn drive(policy: &str, command_vx: f32, seconds: u32) -> Option<crate::zealot::Rollout> {
+    let h = harness_path();
+    if !h.is_file() {
+        return None;
+    }
+    let out_path = std::env::temp_dir().join("nexus_mujoco_rollout.json");
+    let _ = std::fs::remove_file(&out_path);
+
+    let py = Path::new(VENV_PY);
+    let py = if py.is_file() { py.as_os_str() } else { "python3".as_ref() };
+    let mut cmd = Command::new(py);
+    if Path::new(SCENE).is_file() {
+        cmd.env("S2S_MODEL_XML", SCENE);
+    }
+    cmd.env("S2S_NO_VIDEO", "1");
+    cmd.env("S2S_ROLLOUT_JSON", &out_path);
+    if std::env::var_os("MUJOCO_GL").is_none() {
+        cmd.env("MUJOCO_GL", if cfg!(target_os = "macos") { "glfw" } else { "egl" });
+    }
+    let st = cmd
+        .arg(&h)
+        .arg(policy)
+        .arg(std::env::temp_dir().join("nexus_sim2sim.mp4"))
+        .arg(seconds.to_string())
+        .env("BIPED_CMD", format!("{command_vx},0,0"))
+        .output()
+        .ok()?;
+    if !st.status.success() {
+        return None;
+    }
+    crate::zealot::parse_rollout(&std::fs::read_to_string(&out_path).ok()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,5 @@
 diff --git a/scripts/sim2sim_g1_mujoco.py b/scripts/sim2sim_g1_mujoco.py
-index 9f9d768..a9d0b1f 100644
+index 9f9d768..8a47d9a 100644
 --- a/scripts/sim2sim_g1_mujoco.py
 +++ b/scripts/sim2sim_g1_mujoco.py
 @@ -100,7 +100,12 @@ def gait_period_for(cmd_speed: float) -> float:
@@ -16,7 +16,18 @@ index 9f9d768..a9d0b1f 100644
  # Frame width: 45 for v21-and-earlier, 48 once the gyro was added (v22+).
  # Sniffed from the checkpoint so one harness runs both.
  FALL_Z = 0.45
-@@ -322,10 +327,16 @@ def projected_gravity(q_wxyz):
+@@ -127,6 +132,10 @@ if _sw:
+ # touchdown force in units of body weight; settle metric: |angvel| decay
+ # after a command drop.
+ TRANS_JSON = os.environ.get("S2S_TRANS_JSON")
++# S2S_ROLLOUT_JSON=<path>: the rollout in dorobot-nexus's schema, so its URDF
++# viewer can replay what MuJoCo actually simulated instead of only reading the
++# summary numbers.
++ROLLOUT_JSON = os.environ.get("S2S_ROLLOUT_JSON")
+ ARM_LOG = [] if os.environ.get("S2S_ARM_LOG") else None
+ 
+ # S2S_ARM_MOTION=<sonic csv>: replay a retargeted AMASS clip on the PD-held
+@@ -322,10 +331,16 @@ def projected_gravity(q_wxyz):
  def main():
      policy = Policy(POLICY)
      assert policy.act_dim == 12, policy.act_dim
@@ -36,7 +47,7 @@ index 9f9d768..a9d0b1f 100644
  
      model = mujoco.MjModel.from_xml_path(MODEL_XML)
      model.opt.timestep = PHYS_DT
-@@ -420,7 +431,11 @@ def main():
+@@ -420,7 +435,11 @@ def main():
          mujoco.mj_forward(model, data)
  
      n_ctrl = int(SECONDS / CONTROL_DT)
@@ -49,7 +60,15 @@ index 9f9d768..a9d0b1f 100644
          ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
           "-s", f"{W}x{H}", "-r", str(int(1 / CONTROL_DT)), "-i", "-",
           "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", OUT],
-@@ -556,8 +571,9 @@ def main():
+@@ -434,6 +453,7 @@ def main():
+     vel_track = []
+     pitch_track = []
+     traj = []  # per-step (body_vx, body_vy, yaw_rate) for direction-aware metrics
++    roll_base, roll_joints, roll_resets = [], [], []
+     foot_track = [] if os.environ.get("S2S_FOOT_JSON") else None
+     _foot_gids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, n)
+                   for n in ("left_foot", "right_foot")]
+@@ -556,8 +576,9 @@ def main():
          act_hist = [act_hist[1], action.copy()]
          ep_t += 1
  
@@ -61,9 +80,28 @@ index 9f9d768..a9d0b1f 100644
  
          # --- heading-frame velocity tracking (direction-aware, unlike traveled_m) ---
          qw, qx, qy, qz = data.qpos[free_q + 3:free_q + 7]
-@@ -621,8 +637,9 @@ def main():
+@@ -571,6 +592,15 @@ def main():
+ 
+         base_p_t = data.qpos[free_q:free_q + 3].copy()
+         traj.append([float(v) for v in base_p_t] + [float(v) for v in data.qpos[free_q + 3:free_q + 7]])
++        # Rollout for dorobot-nexus's viewer (S2S_ROLLOUT_JSON). Base pose is
++        # reordered here: MuJoCo stores the quaternion (w,x,y,z), zealot's
++        # rollout schema is (x,y,z,w), and a silently-swapped quaternion shows
++        # as a robot lying on its side rather than as an error.
++        if ROLLOUT_JSON is not None:
++            _q = data.qpos[free_q + 3:free_q + 7]
++            roll_base.append([float(v) for v in base_p_t]
++                             + [float(_q[1]), float(_q[2]), float(_q[3]), float(_q[0])])
++            roll_joints.append([float(v) for v in data.qpos[pol_q]])
+         # Optional foot-posture log (S2S_FOOT_JSON): world height of the toe and
+         # heel corners of each foot box, so "toe-walking vs flat" is measured
+         # from geometry rather than inferred from the ankle joint angle (which
+@@ -620,10 +650,19 @@ def main():
+             frames_hist = None
              dist0 = data.qpos[free_q:free_q + 2].copy()
              attempts += 1
++            if ROLLOUT_JSON is not None:
++                roll_resets.append(len(roll_base))
  
 -    ff.stdin.close()
 -    ff.wait()
@@ -71,5 +109,12 @@ index 9f9d768..a9d0b1f 100644
 +        ff.stdin.close()
 +        ff.wait()
      # Structured metrics for benchmark harnesses (S2S_METRICS_JSON=<path>).
++    if ROLLOUT_JSON is not None and roll_base:
++        with open(ROLLOUT_JSON, "w") as f:
++            json.dump({"dt": CONTROL_DT, "joint_names": POLICY_JOINTS,
++                       "resets": roll_resets, "base": roll_base,
++                       "joints": roll_joints}, f)
++        print(f"rollout -> {ROLLOUT_JSON} ({len(roll_base)} frames)")
      tpath = os.environ.get("S2S_TRAJ_JSON")
      if tpath:
+         with open(tpath, "w") as f:
