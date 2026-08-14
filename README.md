@@ -55,6 +55,38 @@ cargo run --release -p nexus-app -- --sweep              # print the robustness 
 cargo run --release -p nexus-app -- --track-check        # does the policy respond to its command?
 ```
 
+### Sim-to-sim against MuJoCo
+
+```bash
+./scripts/setup-zealot.sh                    # the harness lives in zealot
+./scripts/setup-mujoco.sh                    # venv + playground G1 scene + meshes
+cargo run --release -p nexus-app -- --mujoco <ckpt> --cmd 0.3 --seconds 45
+```
+
+The other two cross-sim arms compare Euler against RK4, and one control
+decimation against another. Both share the dynamics function, so both catch
+integration artefacts and nothing else. MuJoCo has its own contact model and
+solver, so it is the first arm that can catch a **modelling** error — the check
+that predicts transfer, and the one Unitree performs before sim-to-real.
+
+The rollout is zealot's own `sim2sim_g1_mujoco.py` rather than a second
+implementation, because that script already encodes the observation frame:
+`last_action` is lag-2, `joint_vel` is a finite difference, the PD target is
+`clamp(default + 0.5·action)` driven as explicit torque at 200 Hz with the
+model's actuators disabled, the frame is stacked 5 deep and Welford-normalised,
+and the gait clock is `max(0, t−1)·dt/0.7`. Re-deriving those and getting one
+wrong produces export drift that reads as a transfer failure.
+
+Also on Validate, as a second button beside cross-sim — it dims and says why
+when the stack is not built.
+
+**It needs a policy worth evaluating.** Against the 500-iteration checkpoint in
+this repo the run reports 100% survival and 0.00 m travelled: the robot stands
+still, which is the same "solved the easy half" failure the Train screen's
+diagnosis names. The engine and initial state are stable under those settings —
+verified directly — so a divergence there is the policy saturating its torques,
+not the integration.
+
 ### With the zealot GPU backend
 
 ```bash
@@ -441,6 +473,7 @@ crates/nexus-engine/       the engine — no dependencies
   src/probe.rs             deterministic rollout with push/scrub (tested)
   src/sweep.rs             robustness surface, CPU and zealot (tested)
   src/crosssim.rs          sim-to-sim comparison, CPU and zealot (tested)
+  src/mujoco.rs            sim-to-sim against MuJoCo, via zealot's harness (tested)
   src/json.rs              the one-object-per-line emitter (tested)
   src/cli.rs               the headless surfaces both consoles inherit (tested)
 
@@ -453,7 +486,7 @@ crates/nexus-app/          the original console
 crates/nexus-studio/       the lifecycle console — eight workspaces
 crates/makepad-plot/       plot widgets, used by nexus-studio
 
-scripts/           setup-zealot.sh
+scripts/           setup-zealot.sh, setup-mujoco.sh
 patches/           the nexus Metal fix, applied not forked
 docs/              the Metal root-cause write-up, the wiring plan, the mockup
 data/g1/           Unitree G1 URDF (BSD-3-Clause, Unitree Robotics)
