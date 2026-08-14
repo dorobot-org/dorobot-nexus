@@ -1,8 +1,42 @@
 diff --git a/scripts/sim2sim_g1_mujoco.py b/scripts/sim2sim_g1_mujoco.py
-index 9f9d768..868a90c 100644
+index 9f9d768..a9d0b1f 100644
 --- a/scripts/sim2sim_g1_mujoco.py
 +++ b/scripts/sim2sim_g1_mujoco.py
-@@ -420,7 +420,11 @@ def main():
+@@ -100,7 +100,12 @@ def gait_period_for(cmd_speed: float) -> float:
+     # Floor matches the trainer's GAIT_PERIOD_MIN: above a 0.5 cap the linear
+     # lerp would extrapolate to a sprint cadence the robot has never walked.
+     return max(0.40, GAIT_PERIOD_SLOW + (GAIT_PERIOD_FAST - GAIT_PERIOD_SLOW) * max(t, 0.0))
+-HIST = 5
++# Observation history depth. Sniffed from the checkpoint like the frame width
++# below, rather than pinned to the current training config: a policy trained
++# without stacking has obs_dim == frame, and hardcoding 5 rejected it with a
++# bare `AssertionError: 53` — which reads as a broken checkpoint and is not.
++# S2S_OBS_HIST overrides when a checkpoint is genuinely ambiguous.
++HIST = int(os.environ.get("S2S_OBS_HIST", "0")) or None
+ # Frame width: 45 for v21-and-earlier, 48 once the gyro was added (v22+).
+ # Sniffed from the checkpoint so one harness runs both.
+ FALL_Z = 0.45
+@@ -322,10 +327,16 @@ def projected_gravity(q_wxyz):
+ def main():
+     policy = Policy(POLICY)
+     assert policy.act_dim == 12, policy.act_dim
+-    assert policy.obs_dim % HIST == 0, policy.obs_dim
+-    frame = policy.obs_dim // HIST
++    global HIST
++    if HIST:
++        assert policy.obs_dim % HIST == 0, policy.obs_dim
++        frame = policy.obs_dim // HIST
++    else:
++        cand = [(f, policy.obs_dim // f) for f in (53, 48, 45) if policy.obs_dim % f == 0]
++        assert cand, f"obs_dim {policy.obs_dim} is not a whole number of 45/48/53 frames"
++        frame, HIST = cand[0]
+     assert frame in (45, 48, 53), f"unexpected obs frame width {frame}"
+-    print(f"obs frame {frame} ({'no' if frame == 45 else 'with'} gyro{', step cue' if frame >= 53 else ''})")
++    print(f"obs frame {frame} x{HIST} ({'no' if frame == 45 else 'with'} gyro{', step cue' if frame >= 53 else ''})")
+ 
+     model = mujoco.MjModel.from_xml_path(MODEL_XML)
+     model.opt.timestep = PHYS_DT
+@@ -420,7 +431,11 @@ def main():
          mujoco.mj_forward(model, data)
  
      n_ctrl = int(SECONDS / CONTROL_DT)
@@ -15,7 +49,7 @@ index 9f9d768..868a90c 100644
          ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
           "-s", f"{W}x{H}", "-r", str(int(1 / CONTROL_DT)), "-i", "-",
           "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", OUT],
-@@ -556,8 +560,9 @@ def main():
+@@ -556,8 +571,9 @@ def main():
          act_hist = [act_hist[1], action.copy()]
          ep_t += 1
  
@@ -27,7 +61,7 @@ index 9f9d768..868a90c 100644
  
          # --- heading-frame velocity tracking (direction-aware, unlike traveled_m) ---
          qw, qx, qy, qz = data.qpos[free_q + 3:free_q + 7]
-@@ -621,8 +626,9 @@ def main():
+@@ -621,8 +637,9 @@ def main():
              dist0 = data.qpos[free_q:free_q + 2].copy()
              attempts += 1
  

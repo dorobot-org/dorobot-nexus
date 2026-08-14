@@ -97,6 +97,16 @@ for crate in "$STACK/nexus/crates/nexus_rbd_shaders3d" "$STACK/vortx-unified/vor
   echo "    primed $(basename "$crate")"
 done
 
+# Metal rejects the grad-clip reduce: its squared-norm slots are packed f32
+# columns, so slot 1 binds at byte offset 4 and Metal enforces a 256-byte
+# min_storage_buffer_offset_alignment. Vulkan asks 16-32, which is why the
+# WebGPU grad-clip leg passed there. Stride the slots instead.
+GC="$PWD/patches/zealot-metal-gradclip-align.patch"
+if [ -f "$GC" ] && git -C "$STACK/zealot" apply --check "$GC" 2>/dev/null; then
+  git -C "$STACK/zealot" apply "$GC"
+  echo "==> applied zealot-metal-gradclip-align"
+fi
+
 echo "==> building biped_train_gpu (WebGPU/Metal on macOS, CUDA where present)"
 cd "$STACK/zealot"
 FEATURES="gpu biped_gpu"

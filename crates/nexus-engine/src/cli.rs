@@ -74,11 +74,15 @@ fn headless(total: u64) -> ! {
     // GPU run. `total` stays a budget in env-steps for both backends: zealot
     // counts iterations, and at 256 envs it emits 24 steps per env per
     // iteration, so the budget converts rather than changing meaning.
+    // The checkpoint is `zealot_ckpt_path()`, not a literal: --crosssim and
+    // --mujoco already resolve it through DOROBOT_ZEALOT_CKPT, and training to
+    // a different file than the validators read is how a run gets scored
+    // against a stale policy.
     #[cfg(feature = "zealot")]
     let (h, backend, note) = match zealot::spawn(
         envs,
         (total / (envs as u64 * 24)).max(1),
-        "dorobot_nexus.safetensors",
+        &zealot_ckpt_path(),
     ) {
         Some(h) => (h, "zealot", zealot::binary_path().display().to_string()),
         None => (
