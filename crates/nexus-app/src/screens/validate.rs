@@ -267,6 +267,40 @@ script_mod! {
                             }
                         }
                     }
+                    // The arm that can catch a modelling error rather than an
+                    // integration artefact — a genuinely independent engine.
+                    // Kept beside cross-sim rather than replacing it: they
+                    // answer different questions and the screen should not
+                    // imply otherwise.
+                    mujoco_btn := RoundedView{
+                        width: Fit height: Fit
+                        margin: Inset{top: 8.}
+                        padding: Inset{left: 12. right: 12. top: 6. bottom: 7.}
+                        cursor: MouseCursor.Hand
+                        draw_bg +: {
+                            color: #x14231B
+                            border_color: #x6FAB78
+                            border_size: 1.0
+                            border_radius: 5.0
+                        }
+                        mujoco_lbl := Label{
+                            text: "Run MuJoCo sim2sim"
+                            draw_text +: {
+                                text_style: mod.widgets.ux.TEXT_CHIP{}
+                                get_color: fn() { return #x9BD3A4 }
+                            }
+                        }
+                    }
+                    // Why it cannot run, when it cannot. The app prefers saying
+                    // why over presenting a dead control.
+                    mujoco_why := Label{
+                        text: ""
+                        margin: Inset{top: 6.}
+                        draw_text +: {
+                            text_style: mod.widgets.ux.TEXT_CHIP{}
+                            get_color: fn() { return #x6C7591 }
+                        }
+                    }
                     mod.widgets.ux.Filler{}
                 }
             }
@@ -359,6 +393,17 @@ impl ValidateScreenRef {
         ux::head(cx, root, ids!(rob.rob_head), "ROBUSTNESS", &head);
         root.label(cx, ids!(rob.rob_body.axis)).set_text(cx, &axis);
 
+        // Say why MuJoCo cannot run, when it cannot, and dim the control —
+        // a stated reason beats a button that fails when pressed.
+        let why = nexus_engine::mujoco::why_unavailable();
+        root.label(cx, ids!(side.cross.cross_body.mujoco_why))
+            .set_text(cx, why.as_deref().unwrap_or(""));
+        let mut btn = root.widget(cx, ids!(side.cross.cross_body.mujoco_btn));
+        if !btn.is_empty() {
+            let on = if why.is_none() { 1.0f64 } else { 0.35 };
+            script_apply_eval!(cx, btn, { draw_bg +: { border_size: #(on) } });
+        }
+
         // The comparison table, from the cross-simulator run.
         let paths: [&[LiveId]; 4] = [
             ids!(side.cmp.cmp_body.v0),
@@ -417,6 +462,13 @@ impl ValidateScreenRef {
     pub fn clicked_run(&self, cx: &mut Cx, actions: &Actions) -> bool {
         let Some(mut inner) = self.borrow_mut() else { return false };
         let b = inner.view.widget(cx, ids!(rob.rob_body.keys.run_btn));
+        !b.is_empty() && ux::view_clicked(actions, b.widget_uid())
+    }
+
+    /// True when "Run MuJoCo sim2sim" was pressed.
+    pub fn clicked_mujoco(&self, cx: &mut Cx, actions: &Actions) -> bool {
+        let Some(mut inner) = self.borrow_mut() else { return false };
+        let b = inner.view.widget(cx, ids!(side.cross.cross_body.mujoco_btn));
         !b.is_empty() && ux::view_clicked(actions, b.widget_uid())
     }
 

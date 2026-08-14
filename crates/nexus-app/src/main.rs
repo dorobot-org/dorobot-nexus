@@ -496,6 +496,21 @@ impl MatchEvent for App {
             dirty = true;
         }
 
+        if self.ui.validate_screen(cx, ids!(page_validate)).clicked_mujoco(cx, actions) {
+            // The command it is scored against has to be the one it was given;
+            // 0.3 m/s matches what zealot_cross drives so the two arms are
+            // comparable. 45 s is long enough for episodes to terminate — the
+            // harness only records an attempt when one ends.
+            match crosssim::spawn_mujoco(&nexus_engine::cli::zealot_ckpt_path(), 0.3, 45) {
+                Some(c) => self.cross = Some(c),
+                None => ::log::info!(
+                    "MuJoCo: {}",
+                    nexus_engine::mujoco::why_unavailable().unwrap_or_default()
+                ),
+            }
+            dirty = true;
+        }
+
         if self.ui.validate_screen(cx, ids!(page_validate)).clicked_cross(cx, actions) {
             #[cfg(feature = "zealot")]
             let started = crosssim::zealot_cross::spawn(&self.zealot_ckpt());
