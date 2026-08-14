@@ -25,6 +25,7 @@ pub mod cli;
 pub mod crosssim;
 pub mod env;
 pub mod json;
+pub mod mujoco;
 pub mod probe;
 pub mod rl;
 pub mod rng;

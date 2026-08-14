@@ -1,0 +1,41 @@
+diff --git a/scripts/sim2sim_g1_mujoco.py b/scripts/sim2sim_g1_mujoco.py
+index edd299c..89d3da8 100644
+--- a/scripts/sim2sim_g1_mujoco.py
++++ b/scripts/sim2sim_g1_mujoco.py
+@@ -421,7 +421,11 @@ def main():
+         mujoco.mj_forward(model, data)
+ 
+     n_ctrl = int(SECONDS / CONTROL_DT)
+-    ff = subprocess.Popen(
++    # S2S_NO_VIDEO=1 runs the rollout for its numbers alone. ffmpeg is opened
++    # before the loop, so without this a machine that has MuJoCo but not ffmpeg
++    # cannot measure anything at all — and the metrics do not depend on the
++    # encode. dorobot-nexus drives this path for sim2sim scoring.
++    ff = None if os.environ.get("S2S_NO_VIDEO") == "1" else subprocess.Popen(
+         ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+          "-s", f"{W}x{H}", "-r", str(int(1 / CONTROL_DT)), "-i", "-",
+          "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", OUT],
+@@ -569,8 +573,9 @@ def main():
+         act_hist = [act_hist[1], action.copy()]
+         ep_t += 1
+ 
+-        renderer.update_scene(data, camera=cam)
+-        ff.stdin.write(renderer.render().tobytes())
++        if ff is not None:
++            renderer.update_scene(data, camera=cam)
++            ff.stdin.write(renderer.render().tobytes())
+ 
+         # --- heading-frame velocity tracking (direction-aware, unlike traveled_m) ---
+         qw, qx, qy, qz = data.qpos[free_q + 3:free_q + 7]
+@@ -634,8 +639,9 @@ def main():
+             dist0 = data.qpos[free_q:free_q + 2].copy()
+             attempts += 1
+ 
+-    ff.stdin.close()
+-    ff.wait()
++    if ff is not None:
++        ff.stdin.close()
++        ff.wait()
+     # Structured metrics for benchmark harnesses (S2S_METRICS_JSON=<path>).
+     tpath = os.environ.get("S2S_TRAJ_JSON")
+     if tpath:

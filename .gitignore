@@ -17,3 +17,6 @@ zealot-stack/
 # Scene library and recordings — user data, not source.
 scenes/
 curriculum.safetensors
+
+# MuJoCo sim2sim stack (venv, playground, menagerie meshes)
+mujoco-stack/

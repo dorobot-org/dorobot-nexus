@@ -239,6 +239,55 @@ pub mod zealot_cross {
     }
 }
 
+/// Sim-to-sim against MuJoCo — a genuinely independent engine.
+///
+/// The two arms above share the dynamics function, so they catch integration
+/// artefacts and nothing else. This one does not: MuJoCo brings its own contact
+/// model and solver, which is what makes it the check that predicts transfer,
+/// and it is the check Unitree's pipeline performs before sim-to-real.
+///
+/// `a` is the policy as zealot itself scores it, `b` as MuJoCo does, so
+/// `worst_gap` reads exactly as it does for the other arms: how far the two
+/// engines disagree about the same policy.
+pub fn spawn_mujoco(ckpt: &str, command_vx: f32, seconds: u32) -> Option<Arc<Mutex<Report>>> {
+    if !crate::mujoco::available() {
+        return None;
+    }
+    let ckpt = ckpt.to_string();
+    let report = Arc::new(Mutex::new(Report {
+        running: true,
+        label: "MuJoCo · independent engine".into(),
+        ..Default::default()
+    }));
+    let out = Arc::clone(&report);
+
+    thread::spawn(move || {
+        let res = crate::mujoco::evaluate(&ckpt, command_vx, seconds);
+        if let Ok(mut r) = out.lock() {
+            match res {
+                Ok(m) => {
+                    r.b = m.score(command_vx);
+                    // No zealot-side number to put beside it here: this entry
+                    // point is the MuJoCo measurement on its own. Validate
+                    // shows one column rather than inventing a comparison.
+                    r.label = format!(
+                        "MuJoCo · {} attempts · obs frame {}",
+                        m.attempts.len(),
+                        m.obs_frame
+                    );
+                    r.done = true;
+                }
+                // The message is the diagnosis — usually an unimportable
+                // module — so it is surfaced rather than replaced.
+                Err(e) => r.label = e,
+            }
+            r.running = false;
+        }
+    });
+
+    Some(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

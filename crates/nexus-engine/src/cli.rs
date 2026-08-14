@@ -320,6 +320,7 @@ fn capabilities() -> ! {
         "--crosssim",
         "--headless",
         "--json",
+        "--mujoco",
         "--no-random",
         "--probe",
         "--sweep",
@@ -421,6 +422,74 @@ fn headless_crosssim(run: &str) -> ! {
         eprintln!("{}", r.label);
     }
     std::process::exit(if r.done { 0 } else { 1 });
+}
+
+/// `--mujoco [ckpt]` validates a policy against MuJoCo and prints what it
+/// measured.
+///
+/// The arm that catches modelling error rather than integration artefacts —
+/// see `mujoco.rs` for why it drives zealot's own harness instead of a second
+/// one. `--cmd` sets the forward velocity to hold, `--seconds` the clip budget.
+fn headless_mujoco(ckpt: &str) -> ! {
+    let json = wants_json();
+    let args: Vec<String> = std::env::args().collect();
+    let num = |flag: &str, dflt: f32| -> f32 {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(dflt)
+    };
+    let cmd_vx = num("--cmd", 0.3);
+    let seconds = num("--seconds", 30.0) as u32;
+
+    match crate::mujoco::evaluate(ckpt, cmd_vx, seconds) {
+        Err(e) => fail(json, &e),
+        Ok(r) => {
+            let s = r.score(cmd_vx);
+            if json {
+                let mut atts = json::Obj::new();
+                for (i, a) in r.attempts.iter().enumerate() {
+                    atts = atts.obj(
+                        &i.to_string(),
+                        json::Obj::new()
+                            .f32("seconds", a.seconds, 2)
+                            .f32("metres", a.metres, 3)
+                            .bool("fell", a.fell),
+                    );
+                }
+                println!(
+                    "{}",
+                    json::Obj::new()
+                        .str("event", "mujoco")
+                        .usize("obs_frame", r.obs_frame)
+                        .usize("attempts", r.attempts.len())
+                        .f32("command_vx", cmd_vx, 3)
+                        .f32("achieved_vx", r.achieved_vx(), 4)
+                        .f32("survival", s.survival, 5)
+                        .f32("tracking", s.tracking, 5)
+                        .f32("fall_rate", s.fall_rate, 5)
+                        .obj("attempts_detail", atts)
+                        .done()
+                );
+            } else {
+                println!("MuJoCo sim-to-sim · obs frame {}", r.obs_frame);
+                println!("{:<12} {:>8} {:>10} {:>8}", "attempt", "seconds", "metres", "outcome");
+                for (i, a) in r.attempts.iter().enumerate() {
+                    println!(
+                        "{:<12} {:>8.1} {:>10.2} {:>8}",
+                        i, a.seconds, a.metres,
+                        if a.fell { "fell" } else { "held" }
+                    );
+                }
+                println!(
+                    "\ncommanded {cmd_vx:.2} m/s · achieved {:.3} · survival {:.0}% · falls {:.0}%",
+                    r.achieved_vx(), s.survival * 100.0, s.fall_rate * 100.0
+                );
+            }
+            std::process::exit(0);
+        }
+    }
 }
 
 /// One probe state, as the driving process reads it.
@@ -594,6 +663,13 @@ pub fn maybe_headless() {
     }
     if let Some(i) = args.iter().position(|a| a == "--probe") {
         headless_probe(&run_arg(&args, i));
+    }
+    if let Some(i) = args.iter().position(|a| a == "--mujoco") {
+        let ck = match args.get(i + 1) {
+            Some(a) if !a.starts_with("--") => a.clone(),
+            _ => zealot_ckpt_path(),
+        };
+        headless_mujoco(&ck);
     }
     if let Some(i) = args.iter().position(|a| a == "--crosssim") {
         headless_crosssim(&run_arg(&args, i));
