@@ -19,6 +19,19 @@ STACK="$PWD/zealot-stack"
 mkdir -p "$STACK"
 
 # repo-url                                        dir             ref
+#
+# These are BRANCH names, and the checkout below takes each branch's tip. That
+# does not reproduce a working stack: zealot's master runs ahead of its sibling
+# branches, and building the tip fails with 17 errors — Ppo::stage_batch,
+# vortx::linalg::PpoStageParams and RbdState::reset_envs_from_templates all
+# missing, because master expects newer vortx/nexus than these tips provide.
+#
+# docs/train-on-macos.md pins exact revs that do build. Until this script pins
+# them too, check out that table by hand after running it:
+#
+#   zealot 329fb3b · nexus d2451e0 · khal c6175be · vortx 1495fe4
+#
+# Verified 2026-08-14: at those revs biped_train_gpu builds on Apple Silicon.
 PINS=(
   "https://github.com/haixuanTao/zealot.git       zealot          master"
   "https://github.com/haixuanTao/nexus.git        nexus           feat/browser-web-demo"
