@@ -252,6 +252,9 @@ pub struct App {
     pub real_lines: Vec<String>,
     #[rust]
     pub real_grid: Option<Vec<Vec<Option<f64>>>>,
+    /// MuJoCo sim-to-sim: the verdict, and the motion that produced it.
+    #[rust]
+    pub mj: Option<crate::nexus::MjRun>,
     #[rust]
     pub replay: Option<crate::nexus::Replay>,
     #[rust]
@@ -260,6 +263,12 @@ pub struct App {
     pub drive_ack: u64,
     #[rust]
     last_fast: Option<std::time::Instant>,
+    /// Samples already folded into `st.live` from the real training handle.
+    #[rust]
+    train_seen: usize,
+    /// Which terrain variant the 3D view currently shows (family|amp|slope|seed).
+    #[rust]
+    terrain_shown: String,
 }
 
 impl AppMain for App {
@@ -299,7 +308,7 @@ impl AppMain for App {
         if self.replay_timer.is_event(event).is_some()
             && self.replay.is_some()
             && self.st.live.playing
-            && matches!(self.st.mode, Mode::Scenes | Mode::Inspect)
+            && matches!(self.st.mode, Mode::Scenes | Mode::Inspect | Mode::Validate)
         {
             self.st.live.frame = (self.st.live.frame + 1) % self.st.live.frames.max(1);
             self.drive_replay(cx);
@@ -346,6 +355,14 @@ impl MatchEvent for App {
         });
         self.st.modal = AppModal::Tour;
         self.sync_all(cx);
+        // Launched as an observer: attach to the named run immediately and
+        // land on Train, so the window opens onto the live curves instead of
+        // a mock — no click required.
+        if std::env::var("DOROBOT_ATTACH_LOG").is_ok() {
+            self.st.modal = AppModal::None;
+            self.st.mode = Mode::Train;
+            self.start_real_train(cx);
+        }
     }
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
@@ -482,6 +499,7 @@ impl App {
         crate::screens::sync_home(self, cx);
         crate::screens::sync_toasts(self, cx);
         crate::screens::sync_modal(self, cx);
+        self.sync_terrain_view(cx);
         self.ui.redraw(cx);
     }
 
@@ -491,13 +509,21 @@ impl App {
         if self.drain_real_proc(cx) {
             dirty = true;
         }
-        // real rollout replay drives the 3D robot
-        if self.replay.is_some() && self.st.live.playing && matches!(self.st.mode, Mode::Scenes | Mode::Inspect) {
+        // MuJoCo sim-to-sim result + the motion it simulated
+        if self.drain_mujoco(cx) {
+            dirty = true;
+        }
+        // real rollout replay drives the 3D robot. Validate is in this list
+        // because sim-to-sim delivers a rollout there: the scores say whether
+        // the policy transferred, and watching it is how you see what "it
+        // didn't" actually looked like.
+        let plays = matches!(self.st.mode, Mode::Scenes | Mode::Inspect | Mode::Validate);
+        if self.replay.is_some() && self.st.live.playing && plays {
             self.drive_replay(cx);
             dirty = true;
         }
         // playback: two cheap value writes, no VM applies
-        if self.st.live.playing && matches!(self.st.mode, Mode::Scenes | Mode::Inspect) {
+        if self.st.live.playing && plays {
             crate::screens::sync_transport_fast(self, cx);
             dirty = true;
         }
@@ -727,30 +753,139 @@ impl App {
         self.ui.redraw(cx);
     }
 
-    /// Drain stdout lines from a running real process; harvest sweep grids.
+    /// Start real training — or, with `DOROBOT_ATTACH_LOG` set, attach to a
+    /// run already going — and adopt it as the selected Run row so every
+    /// screen shows its numbers.
+    fn start_real_train(&mut self, cx: &mut Cx) {
+        let attached = std::env::var("DOROBOT_ATTACH_LOG").is_ok();
+        match crate::nexus::run_train(2_000_000) {
+            Ok(p) => {
+                self.real_proc = Some(p);
+                self.train_seen = 0;
+                let iters: u32 = std::env::var("DOROBOT_ATTACH_ITERS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(2_000);
+                let stage = {
+                    let fam = std::env::var("BIPED_TERRAIN_FAMILY").unwrap_or_default();
+                    let slope = std::env::var("BIPED_TERRAIN_SLOPE_DEG").unwrap_or_default();
+                    match (fam.is_empty(), slope.is_empty()) {
+                        (true, _) => "flat".to_string(),
+                        (false, true) => fam,
+                        (false, false) => format!("{fam} · {slope}°"),
+                    }
+                };
+                let name = if attached { "attached run" } else { "studio run" };
+                self.st.adopt_real_run(name, &stage, iters);
+                self.st.toast(if attached {
+                    "attached to the running trainer — its curves are live".into()
+                } else {
+                    "real training started — 2M env-steps on the linked engine".into()
+                });
+            }
+            Err(e) => self.st.toast(format!("could not start real training: {e}")),
+        }
+        self.sync_all(cx);
+    }
+
+    /// Drain progress from the running engine job; harvest the sweep surface.
     fn drain_real_proc(&mut self, cx: &mut Cx) -> bool {
         let Some(proc_) = &mut self.real_proc else { return false };
         let mut got = false;
         while let Ok(line) = proc_.rx.try_recv() {
             got = true;
-            if proc_.kind == crate::nexus::ProcKind::Sweep {
-                if let Some(cells) = crate::nexus::parse_sweep_row(&line) {
-                    self.real_grid.get_or_insert_with(Vec::new).push(cells);
-                }
-            }
             self.real_lines.push(line);
             if self.real_lines.len() > 200 {
                 self.real_lines.remove(0);
             }
         }
-        let finished = proc_.child.try_wait().ok().flatten();
-        if let Some(status) = finished {
+        // A Train job's numbers come off the metric stream itself, not the
+        // printed lines: reward + fall-rate curves into `st.live`, cumulative
+        // steps into the adopted Run row.
+        if proc_.kind == crate::nexus::ProcKind::Train {
+            if let Some(h) = &proc_.train {
+                if let Ok(g) = h.shared.lock() {
+                    let from = self.train_seen.min(g.samples.len());
+                    // The stream self-trims its history; renumber against what
+                    // remains rather than sticking to absolute indices.
+                    if self.train_seen > g.samples.len() {
+                        self.train_seen = g.samples.len();
+                    }
+                    let fresh = &g.samples[from..];
+                    if !fresh.is_empty() {
+                        got = true;
+                        for s in fresh {
+                            self.st.live.hist.push(s.reward as f64);
+                            self.st.live.hist_full.push(s.reward as f64);
+                        }
+                        // The full-run curve stays bounded by decimation, not
+                        // truncation — the shape of the whole run survives.
+                        if self.st.live.hist_full.len() > 1200 {
+                            let dec: Vec<f64> = self
+                                .st
+                                .live
+                                .hist_full
+                                .chunks(2)
+                                .map(|c| c.iter().sum::<f64>() / c.len() as f64)
+                                .collect();
+                            self.st.live.hist_full = dec;
+                        }
+                        let keep = self.st.live.hist.len().saturating_sub(120);
+                        if keep > 0 {
+                            self.st.live.hist.drain(0..keep);
+                        }
+                        let last = &fresh[fresh.len() - 1];
+                        self.st.live.reward = last.reward as f64;
+                        self.st.live.falls = last.fall_rate as f64 * 100.0;
+                        self.st.live.sps = last.steps_per_sec;
+                        let envs = g.envs.max(1) as u64;
+                        let iter = last.step / (envs * 24);
+                        let steps_m = last.step as f64 / 1.0e6;
+                        let best = self.st.live.hist.iter().cloned().fold(f64::MIN, f64::max);
+                        if let Some(r) = self
+                            .st
+                            .sel
+                            .run
+                            .clone()
+                            .and_then(|id| self.st.run_mut(&id))
+                        {
+                            r.iter = (iter as u32).min(r.iters_per);
+                            r.steps = steps_m;
+                            r.best = Some(best);
+                        }
+                    }
+                    self.train_seen = g.samples.len();
+                }
+            }
+        }
+        // Read the surface itself rather than reconstructing it from printed
+        // rows: the engine is in this process, so the grid is already here.
+        if got && proc_.kind == crate::nexus::ProcKind::Sweep {
+            if let Some(g) = proc_.grid() {
+                self.real_grid = Some(g);
+            }
+        }
+        if proc_.finished() {
             let kind = proc_.kind;
+            // Take the completed surface before dropping the job.
+            if kind == crate::nexus::ProcKind::Sweep {
+                if let Some(g) = proc_.grid() {
+                    self.real_grid = Some(g);
+                }
+            }
+            if kind == crate::nexus::ProcKind::Train {
+                self.st.live.real = false;
+                if let Some(r) = self.st.sel.run.clone().and_then(|id| self.st.run_mut(&id)) {
+                    if r.state == RunState::Running {
+                        r.state = RunState::Completed;
+                    }
+                }
+            }
             self.drive_ack += 1;
             self.real_proc = None;
             let msg = match kind {
-                crate::nexus::ProcKind::Train => format!("real training finished ({status})"),
-                crate::nexus::ProcKind::Sweep => format!("real sweep finished ({status})"),
+                crate::nexus::ProcKind::Train => "real training finished".to_string(),
+                crate::nexus::ProcKind::Sweep => "real sweep finished".to_string(),
             };
             self.st.toast(msg);
             self.st.merge_disk(); // new checkpoints/recordings may exist now
@@ -766,6 +901,88 @@ impl App {
             crate::screens::sync_stage_tl(self, cx);
         }
         got
+    }
+
+    /// Watch a MuJoCo sim-to-sim run: publish its verdict, and hand the motion
+    /// it simulated to the 3D robot once it arrives.
+    ///
+    /// The two land at the same moment — the engine fills both from one harness
+    /// run — but they are taken separately here because the rollout is the
+    /// weaker product: a run can score and still fail to dump a trajectory, and
+    /// that is a result worth showing, not a failure worth discarding.
+    fn drain_mujoco(&mut self, cx: &mut Cx) -> bool {
+        let Some(job) = &self.mj else { return false };
+        let running = job.running();
+        if !running && !job.replayed {
+            let motion = job.rollout.snapshot();
+            if let Some(job) = &mut self.mj {
+                job.replayed = true;
+            }
+            match motion {
+                Some(r) if !r.is_empty() => {
+                    let rp = crate::nexus::replay_from(&r, "mujoco-sim2sim");
+                    self.st.live.frames = rp.joints.len() as u32;
+                    self.st.live.frame = 0;
+                    self.st.live.playing = true;
+                    self.replay = Some(rp);
+                    self.replay_map = None;
+                    self.st.replay_driven = true;
+                    let m = format!("MuJoCo rollout loaded — {} frames on the 3D robot", r.len());
+                    self.st.toast(m);
+                }
+                // Scores without motion. Said plainly rather than left as a
+                // robot standing still, which reads as a policy that froze.
+                _ => self.st.toast("MuJoCo finished — no rollout to replay".into()),
+            }
+            self.drive_ack += 1;
+            crate::drive::dump_state(self);
+            self.sync_all(cx);
+            return true;
+        }
+        // While it runs, the stage shows the elapsed state each tick.
+        running && self.st.mode == Mode::Validate
+    }
+
+    /// Put the SELECTED scene's real ground under the 3D robot: generate (or
+    /// reuse) the terrain mesh through the same `TerrainStrip` the trainer
+    /// collides with, and hand it to RobotView. Flat scenes clear it. Called
+    /// when the selection or a terrain knob changes; cheap when nothing did.
+    pub fn sync_terrain_view(&mut self, cx: &mut Cx) {
+        let sc = crate::nexus::from_ui(&self.st.cur_scene());
+        let key = format!("{}|{:.2}|{:.1}|{:x}", sc.terrain, sc.terrain_amp, sc.terrain_slope_deg, sc.seed);
+        if self.terrain_shown == key {
+            return;
+        }
+        let stage = self.ui.widget(cx, ids!(stage));
+        if stage.is_empty() {
+            return;
+        }
+        let rv = {
+            use makepad_urdf_player::robot_view::RobotViewWidgetRefExt;
+            stage.robot_view(cx, ids!(urdf_wrap.rview))
+        };
+        if rv.is_empty() {
+            return;
+        }
+        let mesh = if sc.terrain.is_empty() {
+            None
+        } else {
+            nexus_engine::zealot::ensure_terrain_mesh(&sc)
+        };
+        {
+            let Some(mut inner) = rv.borrow_mut() else { return };
+            match mesh {
+                Some(path) => match inner.load_terrain(cx, &path.to_string_lossy()) {
+                    Ok(n) => eprintln!("scene: terrain '{}' loaded, {n} triangles", sc.terrain),
+                    Err(e) => {
+                        eprintln!("scene: terrain {} failed to load: {e}", path.display());
+                        return;
+                    }
+                },
+                None => inner.clear_terrain(cx),
+            }
+        }
+        self.terrain_shown = key;
     }
 
     /// Advance the loaded rollout one playback frame into RobotView.
@@ -804,6 +1021,23 @@ impl App {
             .map(|col| col.and_then(|c| row.get(c).copied()).unwrap_or(0.0))
             .collect();
         rv.set_joint_angles(cx, &angles);
+        // The base travels too — apply it, and keep the camera on the robot,
+        // or a walking rollout replays as marching-in-place at the origin
+        // while the real motion happens off-screen on the terrain.
+        let base = rp.base.get(frame).copied();
+        if let Some(b) = base {
+            if let Some(mut inner) = rv.borrow_mut() {
+                inner.set_base_pose(cx, [b[0], b[1], b[2]], [b[3], b[4], b[5], b[6]]);
+                inner.set_camera_target(cx, [b[0], b[1], b[2]]);
+            }
+        }
+        if frame % 50 == 0 {
+            eprintln!(
+                "[replay] frame {frame} angle0 {:.3} base {:?}",
+                angles.first().copied().unwrap_or(0.0),
+                base.map(|b| (b[0], b[1], b[2]))
+            );
+        }
     }
 
     pub fn slider_changed(&mut self, cx: &mut Cx, field: &str, v: f64) {
@@ -850,10 +1084,10 @@ impl App {
             "sweep-run" => st.sweep_run(),
             "real-sweep" => {
                 self.real_grid = None;
-                match crate::nexus::spawn(crate::nexus::ProcKind::Sweep, &["--sweep"]) {
+                match crate::nexus::run_sweep() {
                     Ok(p) => {
                         self.real_proc = Some(p);
-                        self.st.toast("real sweep started — dorobot-nexus --sweep (newest checkpoint)".into());
+                        self.st.toast("real sweep started — the linked engine, newest checkpoint".into());
                     }
                     Err(e) => self.st.toast(format!("could not start real sweep: {e}")),
                 }
@@ -861,12 +1095,27 @@ impl App {
                 return;
             }
             "real-train" => {
-                match crate::nexus::spawn(crate::nexus::ProcKind::Train, &["--headless", "2000000"]) {
-                    Ok(p) => {
-                        self.real_proc = Some(p);
-                        self.st.toast("real training started — dorobot-nexus --headless 2M env-steps (CPU backend)".into());
+                self.start_real_train(cx);
+                return;
+            }
+            // Sim-to-sim against a genuinely independent engine. 0.3 m/s is
+            // what zealot's own cross-check drives, so the two are comparable;
+            // 45 s is long enough for episodes to terminate, and the harness
+            // only records an attempt when one ends.
+            "mujoco-run" => {
+                let ckpt = nexus_engine::cli::zealot_ckpt_path();
+                match crate::nexus::run_mujoco(&ckpt, 0.3, 45) {
+                    Ok(job) => {
+                        // The rollout arrives later and drives the 3D robot;
+                        // clear whatever is playing so the old motion is not
+                        // showing under the new run's numbers.
+                        self.replay = None;
+                        self.replay_map = None;
+                        self.st.replay_driven = false;
+                        self.mj = Some(job);
+                        self.st.toast("MuJoCo sim2sim started — a second engine, ~45 s".into());
                     }
-                    Err(e) => self.st.toast(format!("could not start real training: {e}")),
+                    Err(e) => self.st.toast(e),
                 }
                 self.sync_all(cx);
                 return;

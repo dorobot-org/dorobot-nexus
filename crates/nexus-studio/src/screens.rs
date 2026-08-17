@@ -186,6 +186,17 @@ script_mod! {
     }
 
     // --------------------------------------------------------- timeline --
+    // One measured row of a sim-to-sim result: what was measured, and what the
+    // other engine got. Mono on both sides so the column of numbers lines up.
+    let MjRow = View{
+        width: Fill height: Fit
+        flow: Right
+        spacing: 8.0
+        padding: Inset{left: 9. right: 7. top: 1. bottom: 1.}
+        k := mod.widgets.nx.MonoLbl{ width: 132 }
+        v := mod.widgets.nx.MonoLbl{ width: Fill }
+    }
+
     mod.widgets.screens.TimelinePanel = mod.widgets.nx.Panel{
         height: Fit
         padding: Inset{left: 10. right: 10. top: 8. bottom: 8.}
@@ -252,6 +263,24 @@ script_mod! {
                 b_cell_scene := mod.widgets.nx.Mini{ visible: false text: "save as scene" }
                 Filler{}
                 grey_note := mod.widgets.nx.BodyLbl{ width: Fit }
+            }
+
+            // MuJoCo sim-to-sim. One column, not two: this arm measures the
+            // policy in an independent engine and has no second number to put
+            // beside it, so it reports what it found rather than inventing a
+            // comparison. Hidden until a run exists.
+            mj := View{
+                width: Fill height: Fit
+                visible: false
+                flow: Down
+                spacing: 2.0
+                margin: Inset{top: 8.}
+                mj_cap := mod.widgets.nx.Grp{}
+                mj_r0 := MjRow{}
+                mj_r1 := MjRow{}
+                mj_r2 := MjRow{}
+                mj_r3 := MjRow{}
+                mj_note := mod.widgets.nx.BodyLbl{ margin: Inset{left: 9. top: 4.} }
             }
         }
 
@@ -866,7 +895,7 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                     RunState::Running => {
                         sp.acts = vec![(tt("▮▮ pause"), false), (tt("■ stop"), false)];
                         sp.act_ids = vec!["pause", "stop"];
-                        if crate::nexus::bin_exists() && app.real_proc.is_none() {
+                        if crate::nexus::can_sweep() && app.real_proc.is_none() {
                             sp.acts.push((tt("▶ real train"), false));
                             sp.act_ids.push("real-train");
                         }
@@ -934,7 +963,7 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                 _ => {
                     sp.acts = vec![(tt("▶ run sweep"), false)];
                     sp.act_ids = vec!["sweep-run"];
-                    if crate::nexus::bin_exists() && app.real_proc.is_none() {
+                    if crate::nexus::can_sweep() && app.real_proc.is_none() {
                         sp.acts.push((tt("▶ real sweep"), false));
                         sp.act_ids.push("real-sweep");
                     }
@@ -945,6 +974,35 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                 }
             }
             specs.push(sp);
+
+            // Sim-to-sim. The sweep varies physics inside one engine; this runs
+            // the same policy in a different one. Only the second can catch a
+            // modelling error, which is the failure that decides whether a
+            // policy survives a real robot — so it gets its own group rather
+            // than sitting among the sweep's controls.
+            specs.push(LSpec { grp: Some(caps(&tt("Sim-to-sim"))), ..Default::default() });
+            match nexus_engine::mujoco::why_unavailable() {
+                None => {
+                    let mut mp = LSpec::default();
+                    let busy = app.mj.as_ref().is_some_and(|j| j.running());
+                    if busy {
+                        mp.acts = vec![(tt("running…"), false)];
+                        mp.act_ids = vec!["mujoco-busy"];
+                    } else {
+                        mp.acts = vec![(tt("▶ MuJoCo sim2sim"), false)];
+                        mp.act_ids = vec!["mujoco-run"];
+                    }
+                    specs.push(mp);
+                    specs.push(LSpec {
+                        note: Some(tt(
+                            "MuJoCo brings its own contact model and solver. ~45 s; the rollout it simulates replays on the 3D robot.",
+                        )),
+                        ..Default::default()
+                    });
+                }
+                // Say why rather than offer a control that fails when pressed.
+                Some(why) => specs.push(LSpec { note: Some(why), ..Default::default() }),
+            }
             (head, None, specs)
         }
         Mode::Runs => {

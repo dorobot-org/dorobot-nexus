@@ -253,13 +253,31 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
                 tiles.set_visible(cx, mode == Mode::Train);
             }
             if mode == Mode::Train {
+                // A real stream carries reward, falls and throughput; KL, lr
+                // and episode length are not in it, and a dash is honest where
+                // the mock used to invent them.
+                let (sps, kl, lr, ep) = if app.st.live.real {
+                    (
+                        format!("{:.0}", app.st.live.sps),
+                        "—".to_string(),
+                        "—".to_string(),
+                        "—".to_string(),
+                    )
+                } else {
+                    (
+                        "3,151".into(),
+                        format!("{:.4}", app.st.live.kl),
+                        app.st.live.lr.clone(),
+                        "61".into(),
+                    )
+                };
                 let vals = [
                     (tt("reward"), format!("{:.4}", app.st.live.reward)),
                     (tt("falls"), format!("{:.1}%", app.st.live.falls)),
-                    ("steps/s".into(), "3,151".into()),
-                    ("KL".into(), format!("{:.4}", app.st.live.kl)),
-                    ("lr".into(), app.st.live.lr.clone()),
-                    (tt("ep len"), "61".into()),
+                    ("steps/s".into(), sps),
+                    ("KL".into(), kl),
+                    ("lr".into(), lr),
+                    (tt("ep len"), ep),
                 ];
                 let tpaths = [
                     ids!(sec_run.tiles.tile0), ids!(sec_run.tiles.tile1), ids!(sec_run.tiles.tile2),
@@ -326,6 +344,43 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         set_btn(cx, &tlw, ids!(sec_sweep.chips.b_cell_inspect), &tt("open in Inspect"), has_cell, false, true, l);
         set_btn(cx, &tlw, ids!(sec_sweep.chips.b_cell_scene), &tt("save as scene"), has_cell, false, true, l);
         set_label(cx, &tlw, ids!(sec_sweep.chips.grey_note), &tt("grey = unmeasured, not zero"), l);
+
+        // MuJoCo sim-to-sim, below the surface. Present only once a run has
+        // been started — an empty table of dashes reads as a measurement that
+        // came back zero.
+        let mjv = tlw.view(cx, ids!(sec_sweep.mj));
+        if !mjv.is_empty() {
+            mjv.set_visible(cx, app.mj.is_some());
+        }
+        if let Some(job) = &app.mj {
+            let (label, done, rows) = job.view();
+            let running = job.running();
+            set_label(cx, &tlw, ids!(sec_sweep.mj.mj_cap.lbl), &caps(&tt("Sim-to-sim · MuJoCo")), l);
+            let paths = [
+                ids!(sec_sweep.mj.mj_r0), ids!(sec_sweep.mj.mj_r1),
+                ids!(sec_sweep.mj.mj_r2), ids!(sec_sweep.mj.mj_r3),
+            ];
+            for (row, p) in rows.iter().zip(paths.iter()) {
+                let rw = tlw.widget(cx, *p);
+                if rw.is_empty() {
+                    continue;
+                }
+                set_label(cx, &rw, ids!(k), &tt(row.0), l);
+                // Dashes while it runs: the report is zeroed until the harness
+                // returns, and printing 0.000 would read as a measurement.
+                set_label(cx, &rw, ids!(v), if running { "—" } else { &row.1 }, l);
+            }
+            // `label` is the engine's own status: the attempt count and
+            // observation frame when it worked, the diagnosis when it did not.
+            let note = if running {
+                tt("running — a second engine, its own contact model and solver")
+            } else if done {
+                label
+            } else {
+                format!("{} — {}", tt("did not complete"), label)
+            };
+            set_label(cx, &tlw, ids!(sec_sweep.mj.mj_note), &note, l);
+        }
     }
     if deploy_v {
         let g = &app.st.dg;
