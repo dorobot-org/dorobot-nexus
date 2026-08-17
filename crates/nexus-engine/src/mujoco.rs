@@ -186,12 +186,25 @@ pub fn parse(out: &str) -> Report {
     r
 }
 
-/// Run the harness against a checkpoint.
+/// Where the harness dumps the trajectory it simulated.
+fn rollout_json_path() -> PathBuf {
+    std::env::temp_dir().join("nexus_mujoco_rollout.json")
+}
+
+/// The one place the harness is invoked, returning its stdout.
 ///
-/// Blocking; the caller runs it off the UI thread as `crosssim::spawn` already
-/// does. `seconds` is wall-clock budget for the whole clip, which the harness
-/// divides into as many attempts as survive.
-pub fn evaluate(policy: &str, command_vx: f32, seconds: u32) -> Result<Report, String> {
+/// Every caller below wants the same run with the same environment; they differ
+/// only in what they read back afterwards. Keeping that in one function is what
+/// makes [`evaluate_with_rollout`] possible — the numbers and the motion are
+/// two readings of a single 45-second run, not two runs.
+///
+/// `rollout_json` asks the harness to also dump the trajectory there.
+fn run(
+    policy: &str,
+    command_vx: f32,
+    seconds: u32,
+    rollout_json: Option<&Path>,
+) -> Result<String, String> {
     let h = harness_path();
     if !h.is_file() {
         return Err(format!(
@@ -199,36 +212,46 @@ pub fn evaluate(policy: &str, command_vx: f32, seconds: u32) -> Result<Report, S
             h.display()
         ));
     }
-    // The harness writes an mp4 as its main artefact; this path only wants the
-    // numbers, so it goes somewhere disposable.
     // Prefer the venv; fall back to `python3` so a machine that has MuJoCo
     // installed globally still works.
     let py = Path::new(VENV_PY);
     let py = if py.is_file() { py.as_os_str() } else { "python3".as_ref() };
     let mut cmd = Command::new(py);
-    if Path::new(SCENE).is_file() {
+    // An externally chosen scene wins — launching the console with
+    // S2S_MODEL_XML (+ S2S_HFIELD_JSON / S2S_SPAWN, which inherit on their
+    // own) points the whole sim-to-sim arm at a terrain variant, e.g. the
+    // rough-slope scene scripts/make_mujoco_terrain_scene.py builds. The
+    // playground flat scene stays the default.
+    if std::env::var_os("S2S_MODEL_XML").is_none() && Path::new(SCENE).is_file() {
         cmd.env("S2S_MODEL_XML", SCENE);
     }
+    // Nothing here wants the clip: the harness opens ffmpeg before its loop, so
+    // without this a machine with MuJoCo but no ffmpeg measures nothing.
+    // See patches/zealot-sim2sim-no-video.patch.
+    cmd.env("S2S_NO_VIDEO", "1");
     // The harness defaults to EGL, which exists on Linux and not on macOS —
     // MuJoCo rejects it outright there. `setdefault` on its side means setting
     // it here wins. Left alone if the caller already chose one.
-    // This path wants the numbers, not the clip: the harness opens ffmpeg
-    // before its loop, so without this a machine with MuJoCo but no ffmpeg
-    // measures nothing. See patches/zealot-sim2sim-no-video.patch.
-    cmd.env("S2S_NO_VIDEO", "1");
     if std::env::var_os("MUJOCO_GL").is_none() {
         cmd.env("MUJOCO_GL", if cfg!(target_os = "macos") { "glfw" } else { "egl" });
+    }
+    if let Some(p) = rollout_json {
+        // Removed first, so a failed run reads as "no rollout" rather than
+        // silently replaying the previous one.
+        let _ = std::fs::remove_file(p);
+        cmd.env("S2S_ROLLOUT_JSON", p);
     }
     let out = cmd
         .arg(&h)
         .arg(policy)
+        // The harness writes an mp4 as its main artefact and takes the path
+        // positionally even with video off, so it goes somewhere disposable.
         .arg(std::env::temp_dir().join("nexus_sim2sim.mp4"))
         .arg(seconds.to_string())
         .env("BIPED_CMD", format!("{command_vx},0,0"))
         .output()
         .map_err(|e| format!("could not start the MuJoCo harness: {e}"))?;
 
-    let stdout = String::from_utf8_lossy(&out.stdout);
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         // An unimportable module is the common failure and the message is the
@@ -240,11 +263,49 @@ pub fn evaluate(policy: &str, command_vx: f32, seconds: u32) -> Result<Report, S
             tail.into_iter().rev().collect::<Vec<_>>().join(" / ")
         ));
     }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Run the harness against a checkpoint.
+///
+/// Blocking; the caller runs it off the UI thread as `crosssim::spawn` already
+/// does. `seconds` is wall-clock budget for the whole clip, which the harness
+/// divides into as many attempts as survive.
+pub fn evaluate(policy: &str, command_vx: f32, seconds: u32) -> Result<Report, String> {
+    let stdout = run(policy, command_vx, seconds, None)?;
     let r = parse(&stdout);
     if r.attempts.is_empty() {
         return Err("MuJoCo harness reported no attempts; the run ended early".into());
     }
     Ok(r)
+}
+
+/// Both products of a single run: what MuJoCo measured, and what it simulated.
+///
+/// The numbers say whether the policy transferred; the motion says *how* it
+/// failed, and a fall at one second looks nothing like a policy that stands
+/// still. Asking for them separately meant running the harness twice and
+/// waiting through 45 seconds of physics for data the first run had already
+/// produced.
+///
+/// The rollout is `Option` because it is the weaker of the two: a run whose
+/// numbers parsed but whose dump did not is still a valid verdict, and the
+/// verdict is what the caller asked for.
+pub fn evaluate_with_rollout(
+    policy: &str,
+    command_vx: f32,
+    seconds: u32,
+) -> Result<(Report, Option<crate::zealot::Rollout>), String> {
+    let out = rollout_json_path();
+    let stdout = run(policy, command_vx, seconds, Some(&out))?;
+    let r = parse(&stdout);
+    if r.attempts.is_empty() {
+        return Err("MuJoCo harness reported no attempts; the run ended early".into());
+    }
+    let traj = std::fs::read_to_string(&out)
+        .ok()
+        .and_then(|t| crate::zealot::parse_rollout(&t));
+    Ok((r, traj))
 }
 
 /// Run the harness and return the rollout MuJoCo actually simulated.
@@ -260,37 +321,13 @@ pub fn evaluate(policy: &str, command_vx: f32, seconds: u32) -> Result<Report, S
 /// the quaternion on the way out: MuJoCo stores `(w,x,y,z)` and the schema is
 /// `(x,y,z,w)`, and getting that wrong renders as a robot lying on its side
 /// rather than as an error.
+///
+/// When the caller also wants the verdict, [`evaluate_with_rollout`] returns
+/// both from one run instead.
 pub fn drive(policy: &str, command_vx: f32, seconds: u32) -> Option<crate::zealot::Rollout> {
-    let h = harness_path();
-    if !h.is_file() {
-        return None;
-    }
-    let out_path = std::env::temp_dir().join("nexus_mujoco_rollout.json");
-    let _ = std::fs::remove_file(&out_path);
-
-    let py = Path::new(VENV_PY);
-    let py = if py.is_file() { py.as_os_str() } else { "python3".as_ref() };
-    let mut cmd = Command::new(py);
-    if Path::new(SCENE).is_file() {
-        cmd.env("S2S_MODEL_XML", SCENE);
-    }
-    cmd.env("S2S_NO_VIDEO", "1");
-    cmd.env("S2S_ROLLOUT_JSON", &out_path);
-    if std::env::var_os("MUJOCO_GL").is_none() {
-        cmd.env("MUJOCO_GL", if cfg!(target_os = "macos") { "glfw" } else { "egl" });
-    }
-    let st = cmd
-        .arg(&h)
-        .arg(policy)
-        .arg(std::env::temp_dir().join("nexus_sim2sim.mp4"))
-        .arg(seconds.to_string())
-        .env("BIPED_CMD", format!("{command_vx},0,0"))
-        .output()
-        .ok()?;
-    if !st.status.success() {
-        return None;
-    }
-    crate::zealot::parse_rollout(&std::fs::read_to_string(&out_path).ok()?)
+    let out = rollout_json_path();
+    run(policy, command_vx, seconds, Some(&out)).ok()?;
+    crate::zealot::parse_rollout(&std::fs::read_to_string(&out).ok()?)
 }
 
 #[cfg(test)]

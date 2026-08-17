@@ -314,7 +314,21 @@ impl MatchEvent for App {
         // than an empty one.
         #[cfg(feature = "zealot")]
         {
-            self.trainer = zealot::spawn(256, 2_000, "dorobot_nexus.safetensors");
+            // DOROBOT_ATTACH_LOG makes this console an OBSERVER of a training
+            // run it does not own — the curves tail that log instead of a
+            // freshly spawned trainer, so watching a long shell-launched run
+            // does not start a second one that fights it for the GPU and the
+            // checkpoint. Read-only: closing the window detaches, nothing else.
+            if let Ok(log) = std::env::var("DOROBOT_ATTACH_LOG") {
+                self.trainer = zealot::attach_log(&log);
+                match self.trainer.is_some() {
+                    true => ::log::info!("backend: zealot · attached to {log}"),
+                    false => ::log::warn!("DOROBOT_ATTACH_LOG set but {log} is unreadable"),
+                }
+            }
+            if self.trainer.is_none() {
+                self.trainer = zealot::spawn(256, 2_000, "dorobot_nexus.safetensors");
+            }
             if self.trainer.is_some() {
                 ::log::info!("backend: zealot ({})", zealot::binary_path().display());
             } else {
@@ -337,6 +351,19 @@ impl MatchEvent for App {
             // Initial terrain family; the Scene picker changes it later.
             self.scene = Scene::default();
             self.scene.terrain = std::env::var("DOROBOT_TERRAIN").unwrap_or_default();
+            // Slope/amplitude/seed follow the same env seam, so an attached
+            // console can preview rollouts on the exact terrain variant the
+            // observed run is training on (scene files write these knobs).
+            let envf = |k: &str, d: f32| {
+                std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+            };
+            self.scene.terrain_slope_deg = envf("BIPED_TERRAIN_SLOPE_DEG", 0.0);
+            self.scene.terrain_amp = envf("BIPED_TERRAIN_AMP", 1.0);
+            if let Ok(v) = std::env::var("BIPED_DRIVE_SEED") {
+                if let Ok(seed) = v.parse() {
+                    self.scene.seed = seed;
+                }
+            }
             // One spawn path, so startup and a knob change cannot drift.
             self.respawn_rollout();
         }
@@ -501,29 +528,20 @@ impl MatchEvent for App {
             // 0.3 m/s matches what zealot_cross drives so the two arms are
             // comparable. 45 s is long enough for episodes to terminate — the
             // harness only records an attempt when one ends.
+            //
+            // Numbers and motion from one run: the scores say whether the
+            // policy transferred, the rollout says *how* it failed, and a fall
+            // at 1 s looks nothing like a policy that stands still. Asking for
+            // them separately ran the harness twice and waited through 45 s of
+            // physics for data the first run had already produced.
             let ckpt = nexus_engine::cli::zealot_ckpt_path();
-            match crosssim::spawn_mujoco(&ckpt, 0.3, 45) {
+            self.rollout_frame = 0;
+            match crosssim::spawn_mujoco_into(&ckpt, 0.3, 45, self.rollout.clone()) {
                 Some(c) => self.cross = Some(c),
                 None => ::log::info!(
                     "MuJoCo: {}",
                     nexus_engine::mujoco::why_unavailable().unwrap_or_default()
                 ),
-            }
-            // Also replay what MuJoCo simulated, into the same slot a zealot
-            // rollout uses. The numbers say whether the policy transferred; the
-            // motion says *how* it failed, and a fall at 1 s looks nothing like
-            // a policy that stands still.
-            if nexus_engine::mujoco::available() {
-                let out = self.rollout.clone();
-                self.rollout_frame = 0;
-                out.set(None);
-                std::thread::spawn(move || {
-                    out.set(nexus_engine::mujoco::drive(&ckpt, 0.3, 45));
-                    match out.len() {
-                        0 => eprintln!("mujoco: rollout failed"),
-                        n => eprintln!("mujoco: rollout loaded, {n} frames"),
-                    }
-                });
             }
             dirty = true;
         }

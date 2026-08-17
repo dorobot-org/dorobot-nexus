@@ -250,6 +250,21 @@ pub mod zealot_cross {
 /// `worst_gap` reads exactly as it does for the other arms: how far the two
 /// engines disagree about the same policy.
 pub fn spawn_mujoco(ckpt: &str, command_vx: f32, seconds: u32) -> Option<Arc<Mutex<Report>>> {
+    spawn_mujoco_into(ckpt, command_vx, seconds, crate::zealot::RolloutSlot::default())
+}
+
+/// As [`spawn_mujoco`], and also fills `rollout` with the trajectory MuJoCo
+/// simulated — from the *same* harness run.
+///
+/// This is what a console should call when it can show the motion. The report
+/// answers whether the policy transferred; the rollout answers how it failed,
+/// and the two together are one 45-second run rather than two.
+pub fn spawn_mujoco_into(
+    ckpt: &str,
+    command_vx: f32,
+    seconds: u32,
+    rollout: crate::zealot::RolloutSlot,
+) -> Option<Arc<Mutex<Report>>> {
     if !crate::mujoco::available() {
         return None;
     }
@@ -260,12 +275,15 @@ pub fn spawn_mujoco(ckpt: &str, command_vx: f32, seconds: u32) -> Option<Arc<Mut
         ..Default::default()
     }));
     let out = Arc::clone(&report);
+    // Cleared up front, so a viewer that still holds the previous run's motion
+    // does not play it under this run's numbers.
+    rollout.set(None);
 
     thread::spawn(move || {
-        let res = crate::mujoco::evaluate(&ckpt, command_vx, seconds);
+        let res = crate::mujoco::evaluate_with_rollout(&ckpt, command_vx, seconds);
         if let Ok(mut r) = out.lock() {
             match res {
-                Ok(m) => {
+                Ok((m, traj)) => {
                     r.b = m.score(command_vx);
                     // No zealot-side number to put beside it here: this entry
                     // point is the MuJoCo measurement on its own. Validate
@@ -276,6 +294,7 @@ pub fn spawn_mujoco(ckpt: &str, command_vx: f32, seconds: u32) -> Option<Arc<Mut
                         m.obs_frame
                     );
                     r.done = true;
+                    rollout.set(traj);
                 }
                 // The message is the diagnosis — usually an unimportable
                 // module — so it is surfaced rather than replaced.
