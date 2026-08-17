@@ -1420,7 +1420,7 @@ dependencies = [
 [[package]]
 name = "makepad-urdf-player"
 version = "0.1.0"
-source = "git+https://github.com/dorobot-org/makepad-urdf-viewer?rev=24bfa8f#24bfa8fe98a339cdd464c2b03da68f73166f4c33"
+source = "git+https://github.com/dorobot-org/makepad-urdf-viewer?rev=6a723a2b76bba7e145458138c613e7f9de57f7d8#6a723a2b76bba7e145458138c613e7f9de57f7d8"
 dependencies = [
  "glam",
  "makepad-widgets",
