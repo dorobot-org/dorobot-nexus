@@ -92,4 +92,4 @@ fi
 
 echo
 echo "done. Verify with:"
-echo "  cargo run --release -p nexus-app -- --mujoco <ckpt> --cmd 0.3 --seconds 45"
+echo "  cargo run --release -p nexus-studio -- --mujoco <ckpt> --cmd 0.3 --seconds 45"

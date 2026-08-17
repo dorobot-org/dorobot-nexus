@@ -3,11 +3,14 @@
 //! This crate is the canonical backend. The learner, the vectorised
 //! environment, checkpoints and their provenance, the robustness sweep,
 //! sim-to-sim, the probe, and the zealot client all live here — and none of
-//! them knows a UI exists. Two consoles draw this engine (`nexus-app`, the
-//! original six screens; `nexus-studio`, the port of the approved mockup) and
-//! neither can be depended on from here. The arrow points one way on purpose:
-//! a capability the consoles need is added here and called, never
-//! reimplemented up there.
+//! them knows a UI exists. `nexus-studio` draws this engine and cannot be
+//! depended on from here. The arrow points one way on purpose: a capability
+//! the console needs is added here and called, never reimplemented up there.
+//!
+//! There were two consoles until `nexus-app` was retired. That it could be
+//! deleted without moving any compute is the property this layout was for —
+//! every capability it had was already here, reachable from [`cli`], and the
+//! only thing lost with it was one screen's worth of drawing.
 //!
 //! **It has no dependencies.** Not "few" — none. A clean clone compiles this
 //! crate with nothing but a Rust toolchain, which is what lets other products

@@ -16,20 +16,26 @@ their hands on it. The other trains a policy for hours with their hands off.
 
 ---
 
-## One engine, two consoles
+## One engine, one console
 
     crates/nexus-engine    the engine — the learner, the environment,
                            checkpoints, the sweep, sim-to-sim, the probe,
                            and the headless CLI. Zero dependencies.
-    crates/nexus-app       the original six screens.
     crates/nexus-studio    the lifecycle console: eight workspaces, ported
                            from the approved web mockup.
 
-The arrow points one way. Everything that computes lives in the engine and
-neither console can be depended on from it, so a capability a console needs is
-added to the engine and called — never reimplemented upstairs. The two consoles
-are peers over the same physics in the same process: they are not two versions
-of one app, and neither supersedes the other.
+The arrow points one way. Everything that computes lives in the engine and the
+console cannot be depended on from it, so a capability the console needs is
+added to the engine and called — never reimplemented upstairs.
+
+There were two consoles until `nexus-app`, the original six screens, was
+retired. It is worth saying what that cost, because the answer is the argument
+for this layout: nothing that computes. Every capability it had was already in
+the engine and is still reachable — `--headless`, `--sweep`, `--probe`,
+`--mujoco`, `--track-check` all run from `nexus-studio` because they were never
+part of either console in the first place. What went with it was one screen's
+worth of drawing: an interactive cart-pole transport for the built-in
+environment, which was never about the G1.
 
 **The engine has no dependencies.** Not few — none. That is what lets other
 products consume its artifact schema without inheriting a UI stack, and it is
@@ -41,18 +47,22 @@ a GUI at all.
 
 ```bash
 tools/fetch_robot_meshes.py g1     # 20 MB, once — meshes are fetched, not committed
-cargo run --release -p nexus-app      # the original console, live run in progress
 cargo run --release -p nexus-studio   # the lifecycle console
 ```
 
-`nexus-app` needs nothing but a Rust toolchain. It launches the built-in CPU
-learner, which trains while you watch. `nexus-studio` additionally needs the
-`dorobot-studio` checkout beside this one, for the shared `dorobot-ux` crate.
+`nexus-studio` needs the `dorobot-studio` checkout beside this one, for the
+shared `dorobot-ux` crate. It launches the built-in CPU learner, which trains
+while you watch.
+
+The headless surfaces live in the engine, so they are the same run whichever
+way you reach them:
 
 ```bash
-cargo run --release -p nexus-app -- --headless 2000000   # train without a window
-cargo run --release -p nexus-app -- --sweep              # print the robustness surface as text
-cargo run --release -p nexus-app -- --track-check        # does the policy respond to its command?
+cargo run --release -p nexus-studio -- --headless 2000000  # train without a window
+cargo run --release -p nexus-studio -- --sweep             # print the robustness surface as text
+cargo run --release -p nexus-studio -- --track-check       # does the policy respond to its command?
+cargo run --release -p nexus-studio -- --probe             # step a checkpoint interactively, on stdin
+cargo run --release -p nexus-studio -- --capabilities      # what this build can actually do
 ```
 
 ### Sim-to-sim against MuJoCo
@@ -60,7 +70,7 @@ cargo run --release -p nexus-app -- --track-check        # does the policy respo
 ```bash
 ./scripts/setup-zealot.sh                    # the harness lives in zealot
 ./scripts/setup-mujoco.sh                    # venv + playground G1 scene + meshes
-cargo run --release -p nexus-app -- --mujoco <ckpt> --cmd 0.3 --seconds 45
+cargo run --release -p nexus-studio -- --mujoco <ckpt> --cmd 0.3 --seconds 45
 ```
 
 The other two cross-sim arms compare Euler against RK4, and one control
@@ -91,7 +101,7 @@ not the integration.
 
 ```bash
 ./scripts/setup-zealot.sh                   # clones + builds the GPU stack (slow, once)
-cargo run --release -p nexus-app --features zealot       # same studio, GPU biped behind it
+cargo run --release -p nexus-studio --features zealot    # same console, GPU biped behind it
 ```
 
 `setup-zealot.sh` clones seven upstream repos at pinned revisions, installs the
@@ -477,7 +487,6 @@ crates/nexus-engine/       the engine — no dependencies
   src/json.rs              the one-object-per-line emitter (tested)
   src/cli.rs               the headless surfaces both consoles inherit (tested)
 
-crates/nexus-app/          the original console
   src/ux.rs                design tokens, chrome, nav rail
   src/plot.rs              multi-series line plot widget
   src/state.rs             run model + the diagnosis catalogue (tested)
@@ -495,8 +504,8 @@ data/g1/           Unitree G1 URDF (BSD-3-Clause, Unitree Robotics)
 ## Tests
 
 ```bash
-cargo test --workspace                          # 88 tests
-cargo test --workspace --features nexus-app/zealot   # 90 — adds the zealot parsers
+cargo test --workspace                                 # 91 tests
+cargo test --workspace --features nexus-studio/zealot  # 93 — adds the zealot parsers
 ```
 
 The zealot parsers are tested against **verbatim** output captured from real

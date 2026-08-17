@@ -10,8 +10,8 @@ name = "nexus-studio"
 path = "src/main.rs"
 
 [dependencies]
-# The engine, linked rather than spawned: this console and nexus-app draw the
-# same physics in the same process.
+# The engine, linked rather than spawned: the console draws the same physics
+# it computes, in the same process.
 nexus-engine = { workspace = true }
 makepad-widgets = { workspace = true }
 makepad-plot = { path = "../makepad-plot" }

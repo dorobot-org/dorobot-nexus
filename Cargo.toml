@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "crates/nexus-engine",
-    "crates/nexus-app",
     "crates/nexus-studio",
 ]
 
@@ -15,9 +14,9 @@ license = "MIT"
 nexus-engine = { path = "crates/nexus-engine" }
 
 # The shared visual language, from the dorobot-studio repository. Only the
-# studio console uses it; nexus-engine depends on nothing at all and
-# nexus-app draws with its own tokens, so the engine's bare-clone property
-# survives this even though the full workspace no longer has it.
+# console uses it; nexus-engine depends on nothing at all, so the engine's
+# bare-clone property survives this even though the full workspace no longer
+# has it.
 dorobot-ux = { path = "../dorobot-studio/crates/dorobot-ux" }
 
 makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev" }
