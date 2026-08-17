@@ -466,6 +466,12 @@ pub struct Sel {
     pub recipe: usize, // 0 = PD×friction, 1 = mass×push
 }
 
+/// A known surface, for testing the pass-percentage arithmetic only.
+///
+/// This used to be what "run sweep" showed. It is kept because
+/// `sweep_pass_computes` needs a grid whose answer is known by hand, and it is
+/// `#[cfg(test)]` so that it cannot become a screen's data again.
+#[cfg(test)]
 pub const SWEEP_REF: [[Option<f64>; 8]; 5] = [
     [Some(0.81), Some(0.86), Some(0.90), Some(0.88), Some(0.84), Some(0.61), Some(0.55), Some(0.28)],
     [Some(0.77), Some(0.85), Some(0.92), Some(0.94), Some(0.89), Some(0.79), Some(0.58), Some(0.31)],

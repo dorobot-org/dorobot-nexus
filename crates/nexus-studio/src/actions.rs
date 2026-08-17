@@ -483,12 +483,6 @@ impl Store {
 
     // ================================================================= sweep
 
-    pub fn sweep_run(&mut self) {
-        self.sweep_grid = Some(SWEEP_REF);
-        self.sweep_at = 0;
-        self.sweep_state = SweepState::Running;
-        self.sel.cell = None;
-    }
 
     pub fn sweep_stop(&mut self) {
         self.sweep_state = SweepState::Aborted;
@@ -1215,16 +1209,9 @@ impl Store {
             self.live.frame = (self.live.frame + 3) % self.live.frames.max(1);
         }
         self.gate_tick();
-        if self.sweep_state == SweepState::Running {
-            self.sweep_at += 1;
-            if self.sweep_at >= 40 {
-                self.sweep_at = 40;
-                self.sweep_state = SweepState::Complete;
-                let p = self.sweep_pass().to_string();
-                let m = self.trf("Sweep complete — {0}% of cells pass", &[&p]);
-                self.toast(m);
-            }
-        }
+        // A running sweep is a real one. Its cell count and completion arrive
+        // from the engine's surface in `drain_real_proc`; revealing a fixture
+        // on a timer here would race the measurement and win.
         let now = self.clock;
         self.toasts.retain(|t| now - t.born < if t.undo.is_some() { 6.0 } else { 3.2 });
     }

@@ -65,16 +65,23 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
     // one is picked, else the first that carries a URDF. A path that is not on
     // disk is refused rather than shown as an empty stage, which leaves the
     // schematic figure as the fallback and says so in a toast.
-    let urdf_path = app
-        .st
-        .sel
-        .robot
-        .as_ref()
-        .and_then(|id| app.st.robots.iter().find(|r| &r.id == id))
-        .and_then(|r| r.urdf.clone())
-        .or_else(|| app.st.robots.iter().find_map(|r| r.urdf.clone()))
-        .filter(|p| std::path::Path::new(p).is_file());
-    let show_3d = urdf_path.is_some();
+    // NEXUS_MJCF: the stage shows the MuJoCo model through the mjvScene
+    // bridge instead — loading the URDF too would stand a second robot
+    // inside the first.
+    let mjcf_mode = std::env::var("NEXUS_MJCF").is_ok();
+    let urdf_path = if mjcf_mode {
+        None
+    } else {
+        app.st
+            .sel
+            .robot
+            .as_ref()
+            .and_then(|id| app.st.robots.iter().find(|r| &r.id == id))
+            .and_then(|r| r.urdf.clone())
+            .or_else(|| app.st.robots.iter().find_map(|r| r.urdf.clone()))
+            .filter(|p| std::path::Path::new(p).is_file())
+    };
+    let show_3d = urdf_path.is_some() || mjcf_mode;
     {
         let wrapv = stage.view(cx, ids!(urdf_wrap));
         if !wrapv.is_empty() {
@@ -304,29 +311,32 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         }
     }
     if sweep_v {
-        if let Some(g) = &app.real_grid {
-            tlw.heat(cx, ids!(sec_sweep.heat)).set_dyn(cx, g, None, l);
-        } else {
-            tlw.heat(cx, ids!(sec_sweep.heat)).set(cx, app.st.sweep_grid.as_ref(), app.st.sweep_at, app.st.sel.cell, l, false);
-        }
+        // One surface, one path. There used to be two grids here — the
+        // engine's and a fixture — with a branch picking whichever was set,
+        // so the same panel could be showing either and did not say which.
+        tlw.heat(cx, ids!(sec_sweep.heat)).set(cx, app.st.sweep_grid.as_ref(), app.st.sweep_at, app.st.sel.cell, l, false);
+        // The axes the *engine* varied, when a sweep has run: the zealot arm
+        // varies gain and friction, the built-in one mass and force, and the
+        // recipe's own labels describe neither once a real sweep has answered.
         let rc = &RECIPES[app.st.sel.recipe];
-        let ax = format!(
-            "Y {} — {}   ·   X {} — {}",
-            rc.fr.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" "),
-            tt(rc.yl),
-            rc.ga.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" "),
-            tt(rc.xl)
-        );
+        let ax = app
+            .real_proc
+            .as_ref()
+            .and_then(|p| p.axes())
+            .unwrap_or_else(|| format!(
+                "Y {} — {}   ·   X {} — {}",
+                rc.fr.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" "),
+                tt(rc.yl),
+                rc.ga.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" "),
+                tt(rc.xl)
+            ));
         set_label(cx, &tlw, ids!(sec_sweep.ax), &ax, l);
-        let sttxt = if app.real_grid.is_some() {
-            let rows = app.real_grid.as_ref().map(|g| g.len()).unwrap_or(0);
-            format!("{} · {rows} rows", tt("real sweep"))
-        } else { match app.st.sweep_state {
+        let sttxt = match app.st.sweep_state {
             SweepState::Idle => tt("No surface yet — run the sweep from the left rail. 40 cells · 12 episodes each."),
             SweepState::Running => tf("sweeping {0}/40", &[&app.st.sweep_at.to_string()]),
-            SweepState::Aborted => tf("aborted at {0}/40 — partial kept", &[&app.st.sweep_at.to_string()]),
+            SweepState::Aborted => tf("abandoned at {0}/40 — partial kept", &[&app.st.sweep_at.to_string()]),
             SweepState::Complete => tt("complete"),
-        }};
+        };
         set_chip(cx, &tlw, ids!(sec_sweep.chips.st_chip), &sttxt, None, false, l);
         let pass = tf("{0}% of measured cells pass", &[&app.st.sweep_pass().to_string()]);
         set_chip(cx, &tlw, ids!(sec_sweep.chips.pass_chip), &pass, None, false, l);

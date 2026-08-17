@@ -250,11 +250,12 @@ pub struct App {
     pub real_proc: Option<crate::nexus::RealProc>,
     #[rust]
     pub real_lines: Vec<String>,
-    #[rust]
-    pub real_grid: Option<Vec<Vec<Option<f64>>>>,
     /// MuJoCo sim-to-sim: the verdict, and the motion that produced it.
     #[rust]
     pub mj: Option<crate::nexus::MjRun>,
+    /// Cross-sim: the same policy in two implementations of the same physics.
+    #[rust]
+    pub cross: Option<crate::nexus::CrossRun>,
     #[rust]
     pub replay: Option<crate::nexus::Replay>,
     #[rust]
@@ -269,6 +270,22 @@ pub struct App {
     /// Which terrain variant the 3D view currently shows (family|amp|slope|seed).
     #[rust]
     terrain_shown: String,
+    /// NEXUS_MJCF: the MuJoCo model whose mjvScene the stage renders, kept
+    /// loaded so a later step can drive its qpos.
+    #[rust]
+    pub mjcf: Option<nexus_mujoco::Model>,
+    #[rust]
+    mjcf_pushed: bool,
+    /// Train-mode policy preview in flight: the run's checkpoint rolled out
+    /// on the stage's scene, so training replays through the same path a
+    /// Validate sim-to-sim does.
+    #[rust]
+    pub preview: Option<crate::nexus::PreviewJob>,
+    /// Checkpoint + scene identity the current preview answers. A new
+    /// checkpoint (path or mtime) or a scene edit invalidates it; an
+    /// unchanged one does not re-drive.
+    #[rust]
+    preview_key: String,
 }
 
 impl AppMain for App {
@@ -308,7 +325,7 @@ impl AppMain for App {
         if self.replay_timer.is_event(event).is_some()
             && self.replay.is_some()
             && self.st.live.playing
-            && matches!(self.st.mode, Mode::Scenes | Mode::Inspect | Mode::Validate)
+            && matches!(self.st.mode, Mode::Scenes | Mode::Inspect | Mode::Validate | Mode::Train)
         {
             self.st.live.frame = (self.st.live.frame + 1) % self.st.live.frames.max(1);
             self.drive_replay(cx);
@@ -500,6 +517,7 @@ impl App {
         crate::screens::sync_toasts(self, cx);
         crate::screens::sync_modal(self, cx);
         self.sync_terrain_view(cx);
+        self.sync_mjcf_view(cx);
         self.ui.redraw(cx);
     }
 
@@ -513,11 +531,18 @@ impl App {
         if self.drain_mujoco(cx) {
             dirty = true;
         }
+        // Train shows the policy the run is producing: whenever the
+        // checkpoint or the scene changes, roll it out in the background and
+        // replay the result — training and validation render through one
+        // path, one robot, one look.
+        if self.tick_train_preview(cx) {
+            dirty = true;
+        }
         // real rollout replay drives the 3D robot. Validate is in this list
         // because sim-to-sim delivers a rollout there: the scores say whether
         // the policy transferred, and watching it is how you see what "it
-        // didn't" actually looked like.
-        let plays = matches!(self.st.mode, Mode::Scenes | Mode::Inspect | Mode::Validate);
+        // didn't" actually looked like. Train is here for the policy preview.
+        let plays = matches!(self.st.mode, Mode::Scenes | Mode::Inspect | Mode::Validate | Mode::Train);
         if self.replay.is_some() && self.st.live.playing && plays {
             self.drive_replay(cx);
             dirty = true;
@@ -788,6 +813,37 @@ impl App {
         self.sync_all(cx);
     }
 
+    /// Start the engine behind a run the user just configured and launched.
+    ///
+    /// Distinct from [`Self::start_real_train`] only in who owns the run row:
+    /// there, the trainer is found first and a row is adopted for it; here,
+    /// `Store::launch` has already inserted the row with its snapshot — the
+    /// set, the scenes, the warm start — and that provenance is the point of
+    /// the pre-flight, so it is kept and the engine started underneath it.
+    ///
+    /// Before this, Launch inserted the row and started nothing: the timeline
+    /// that followed was a demo curve, and the only way to train from the
+    /// console was a second control labelled "real train".
+    fn begin_launched_run(&mut self, cx: &mut Cx) {
+        match crate::nexus::run_train(2_000_000) {
+            Ok(p) => {
+                self.real_proc = Some(p);
+                self.train_seen = 0;
+                self.st.live.real = true;
+                self.st.live.hist.clear();
+                self.st.live.now_hist.clear();
+                self.st.live.hist_full.clear();
+            }
+            // The row stays. It records what was asked for, which is still
+            // true; the toast says the engine did not start.
+            Err(e) => {
+                self.st.live.real = false;
+                self.st.toast(format!("launched, but training did not start: {e}"));
+            }
+        }
+        self.sync_all(cx);
+    }
+
     /// Drain progress from the running engine job; harvest the sweep surface.
     fn drain_real_proc(&mut self, cx: &mut Cx) -> bool {
         let Some(proc_) = &mut self.real_proc else { return false };
@@ -860,17 +916,33 @@ impl App {
         }
         // Read the surface itself rather than reconstructing it from printed
         // rows: the engine is in this process, so the grid is already here.
+        // `sweep_at` is the engine's own measured count, which is what the
+        // pass percentage takes its denominator from.
         if got && proc_.kind == crate::nexus::ProcKind::Sweep {
-            if let Some(g) = proc_.grid() {
-                self.real_grid = Some(g);
+            if let Some((g, done)) = proc_.grid() {
+                self.st.sweep_grid = Some(g);
+                self.st.sweep_at = done;
             }
         }
         if proc_.finished() {
             let kind = proc_.kind;
             // Take the completed surface before dropping the job.
             if kind == crate::nexus::ProcKind::Sweep {
-                if let Some(g) = proc_.grid() {
-                    self.real_grid = Some(g);
+                if let Some((g, done)) = proc_.grid() {
+                    self.st.sweep_grid = Some(g);
+                    self.st.sweep_at = done;
+                }
+                // Aborted runs keep the partial surface and say so; only a run
+                // that reached the end is complete.
+                if self.st.sweep_state == SweepState::Running {
+                    self.st.sweep_state = SweepState::Complete;
+                    let p = self.st.sweep_pass();
+                    let m = crate::i18n::trf(
+                        self.st.lang,
+                        "Sweep complete — {0}% of cells pass",
+                        &[&p.to_string()],
+                    );
+                    self.st.toast(m);
                 }
             }
             if kind == crate::nexus::ProcKind::Train {
@@ -887,7 +959,9 @@ impl App {
                 crate::nexus::ProcKind::Train => "real training finished".to_string(),
                 crate::nexus::ProcKind::Sweep => "real sweep finished".to_string(),
             };
-            self.st.toast(msg);
+            if kind == crate::nexus::ProcKind::Train {
+                self.st.toast(msg);
+            }
             self.st.merge_disk(); // new checkpoints/recordings may exist now
             crate::drive::dump_state(self);
             self.sync_all(cx);
@@ -948,6 +1022,11 @@ impl App {
     /// collides with, and hand it to RobotView. Flat scenes clear it. Called
     /// when the selection or a terrain knob changes; cheap when nothing did.
     pub fn sync_terrain_view(&mut self, cx: &mut Cx) {
+        // An MJCF scene brings its own ground through the bridge; the scene
+        // library's terrain would stack a second world on top of it.
+        if std::env::var("NEXUS_MJCF").is_ok() {
+            return;
+        }
         let sc = crate::nexus::from_ui(&self.st.cur_scene());
         let key = format!("{}|{:.2}|{:.1}|{:x}", sc.terrain, sc.terrain_amp, sc.terrain_slope_deg, sc.seed);
         if self.terrain_shown == key {
@@ -986,6 +1065,199 @@ impl App {
     }
 
     /// Advance the loaded rollout one playback frame into RobotView.
+    /// NEXUS_MJCF=<model.xml>: put the MuJoCo model itself on the stage.
+    ///
+    /// The bridge loads the MJCF with the real libmujoco, poses it (first
+    /// keyframe when one exists), and hands over its mjvScene — every geom
+    /// MuJoCo would draw, meshes and heightfields resolved to triangles,
+    /// primitives to shared unit meshes scaled per instance. The stage's own
+    /// renderer draws them: same shadows, same sky, same materials as
+    /// everything else. One shot; failures toast and leave the stage as it
+    /// was.
+    pub fn sync_mjcf_view(&mut self, cx: &mut Cx) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        if self.mjcf_pushed {
+            return;
+        }
+        let Ok(path) = std::env::var("NEXUS_MJCF") else { return };
+        let stage = self.ui.widget(cx, ids!(stage));
+        if stage.is_empty() {
+            return;
+        }
+        let rv = {
+            use makepad_urdf_player::robot_view::RobotViewWidgetRefExt;
+            stage.robot_view(cx, ids!(urdf_wrap.rview))
+        };
+        if rv.is_empty() {
+            return;
+        }
+        self.mjcf_pushed = true;
+        if let Some(why) = nexus_mujoco::why_unavailable() {
+            self.st.toast(format!("MJCF view unavailable: {why}"));
+            return;
+        }
+        let mut model = match nexus_mujoco::Model::load(&path) {
+            Ok(m) => m,
+            Err(e) => {
+                self.st.toast(format!("MJCF load failed: {e}"));
+                return;
+            }
+        };
+        if model.nkey() > 0 {
+            model.reset_keyframe(0);
+        }
+        let geoms = model.scene();
+        let Some(mut inner) = rv.borrow_mut() else { return };
+        fn h<T: Hash>(v: &T) -> u64 {
+            let mut s = DefaultHasher::new();
+            v.hash(&mut s);
+            s.finish()
+        }
+        fn q(v: f32) -> i64 {
+            (v * 1000.0).round() as i64
+        }
+        use makepad_urdf_player::robot_view::ExternalItem;
+        use nexus_mujoco::{prim, GeomKind};
+        let mut uploaded: std::collections::HashSet<u64> = Default::default();
+        let mut items: Vec<ExternalItem> = Vec::new();
+        for g in &geoms {
+            // (key, per-instance scale, mesh built on first sight of the key)
+            let (key, scale, built) = match g.kind {
+                GeomKind::Mesh { id } => {
+                    let key = h(&("mesh", id));
+                    let m = (!uploaded.contains(&key))
+                        .then(|| model.mesh(id as usize))
+                        .flatten();
+                    (key, [1.0f32; 3], m)
+                }
+                GeomKind::Hfield { id } => {
+                    let key = h(&("hfield", id));
+                    let m = (!uploaded.contains(&key))
+                        .then(|| model.hfield(id as usize))
+                        .flatten();
+                    (key, [1.0; 3], m)
+                }
+                GeomKind::Sphere { r } => (h(&"usphere"), [r, r, r], Some(prim::unit_sphere(16, 24))),
+                GeomKind::Ellipsoid { half } => (h(&"usphere"), half, Some(prim::unit_sphere(16, 24))),
+                GeomKind::Cylinder { r, half_len } => {
+                    (h(&"ucyl"), [r, r, half_len], Some(prim::unit_cylinder(28)))
+                }
+                GeomKind::Capsule { r, half_len } => (
+                    h(&("cap", q(r), q(half_len))),
+                    [1.0; 3],
+                    Some(prim::capsule(r, half_len, 8, 24)),
+                ),
+                GeomKind::Box { half } => (h(&"ubox"), half, Some(prim::unit_box())),
+                GeomKind::Plane { half } => {
+                    let hx = if half[0] > 0.0 { half[0] } else { 25.0 };
+                    let hy = if half[1] > 0.0 { half[1] } else { 25.0 };
+                    (h(&("plane", q(hx), q(hy))), [1.0; 3], Some(prim::plane(hx, hy)))
+                }
+                GeomKind::Other(_) => continue,
+            };
+            if !uploaded.contains(&key) {
+                match built {
+                    Some(m) => {
+                        inner.upsert_external_mesh(cx, key, &m.positions, &m.normals, &m.indices);
+                        uploaded.insert(key);
+                    }
+                    // Extraction refused (the bridge logs why); a missing part
+                    // beats a garbage one.
+                    None => continue,
+                }
+            }
+            // MJCF grounds ship white and take their look from textures this
+            // path does not sample; give them the stage palette instead.
+            let (color, rough, met) = match g.kind {
+                GeomKind::Hfield { .. } => ([0.34, 0.33, 0.30, 1.0], 0.95, 0.0),
+                GeomKind::Plane { .. } => ([0.20, 0.30, 0.40, 1.0], 0.90, 0.0),
+                GeomKind::Mesh { .. } => (g.rgba, 0.42, 0.10),
+                _ => (g.rgba, 0.55, 0.0),
+            };
+            items.push(ExternalItem {
+                mesh_key: key,
+                // column-major from MuJoCo's row-major 3x3 + position
+                transform: [
+                    g.mat[0], g.mat[3], g.mat[6], 0.0,
+                    g.mat[1], g.mat[4], g.mat[7], 0.0,
+                    g.mat[2], g.mat[5], g.mat[8], 0.0,
+                    g.pos[0], g.pos[1], g.pos[2], 1.0,
+                ],
+                scale,
+                color,
+                roughness: rough,
+                metallic: met,
+            });
+        }
+        let n = items.len();
+        inner.set_external_items(cx, items);
+        inner.frame_camera_on_external(cx);
+        drop(inner);
+        self.mjcf = Some(model);
+        self.st.toast(format!("MJCF on stage: {n} geoms via libmujoco"));
+    }
+
+    /// Keep Train mode's stage honest: the 3D robot replays what the policy
+    /// can do *now*. Watches the checkpoint the run is producing (path and
+    /// mtime — trainers overwrite in place) and the scene under the stage;
+    /// when either changes, `zealot::drive` rolls the checkpoint out on that
+    /// scene's physics in the background, and the arrival replaces the
+    /// playing motion. One drive in flight at a time; a failed or collapsed
+    /// rollout keeps the previous motion and is not retried until the
+    /// checkpoint moves again. Returns true when fresh motion just landed.
+    fn tick_train_preview(&mut self, cx: &mut Cx) -> bool {
+        if self.st.mode != Mode::Train {
+            return false;
+        }
+        // Harvest a finished drive before considering a new one.
+        if let Some(job) = &self.preview {
+            if !job.done.load(std::sync::atomic::Ordering::Relaxed) {
+                return false;
+            }
+            let job = self.preview.take().unwrap();
+            match job.slot.snapshot() {
+                Some(r) if !r.is_empty() && !r.collapsed() => {
+                    let rp = crate::nexus::replay_from(&r, "policy-preview");
+                    self.st.live.frames = rp.joints.len() as u32;
+                    self.st.live.frame = 0;
+                    self.replay = Some(rp);
+                    self.replay_map = None;
+                    self.st.replay_driven = true;
+                    self.st.live.playing = true;
+                    self.drive_replay(cx);
+                    return true;
+                }
+                _ => {
+                    eprintln!("[preview] rollout failed or collapsed — keeping the last motion");
+                    return false;
+                }
+            }
+        }
+        let ckpt = nexus_engine::cli::zealot_ckpt_path();
+        let Ok(meta) = std::fs::metadata(&ckpt) else { return false };
+        let stamp = meta.modified().map(|t| format!("{t:?}")).unwrap_or_default();
+        let sc = self.st.cur_scene();
+        let key = format!(
+            "{ckpt}|{stamp}|{}|{:.2}|{:.1}|{}|{:.2}",
+            sc.terrain, sc.amp, sc.slope, sc.seed, sc.stance
+        );
+        if key == self.preview_key {
+            return false;
+        }
+        match crate::nexus::spawn_preview(&ckpt, &sc) {
+            Some(job) => {
+                eprintln!("[preview] driving {ckpt} on '{}'", sc.name);
+                self.preview_key = key;
+                self.preview = Some(job);
+            }
+            // No drive binary on this machine: nothing will ever arrive, so
+            // remember the key rather than probing every tick.
+            None => self.preview_key = key,
+        }
+        false
+    }
+
     fn drive_replay(&mut self, cx: &mut Cx) {
         let Some(rp) = &self.replay else { return };
         let frame = (self.st.live.frame as usize).min(rp.joints.len().saturating_sub(1));
@@ -1081,15 +1353,21 @@ impl App {
             "resume" => st.resume(),
             "stop" => st.stop(),
             // sweep
-            "sweep-run" => st.sweep_run(),
-            "real-sweep" => {
-                self.real_grid = None;
+            // The engine's sweep, not a canned surface. There used to be two
+            // controls here — this one replaying a fixture and a second one
+            // labelled "real" — which put the honest measurement behind the
+            // demo and made "run sweep" mean whichever the reader guessed.
+            "sweep-run" => {
                 match crate::nexus::run_sweep() {
                     Ok(p) => {
                         self.real_proc = Some(p);
-                        self.st.toast("real sweep started — the linked engine, newest checkpoint".into());
+                        self.st.sweep_grid = None;
+                        self.st.sweep_at = 0;
+                        self.st.sel.cell = None;
+                        self.st.sweep_state = SweepState::Running;
+                        self.st.toast("Sweep started — 40 cells on the linked engine".into());
                     }
-                    Err(e) => self.st.toast(format!("could not start real sweep: {e}")),
+                    Err(e) => self.st.toast(format!("could not start the sweep: {e}")),
                 }
                 self.sync_all(cx);
                 return;
@@ -1120,8 +1398,33 @@ impl App {
                 self.sync_all(cx);
                 return;
             }
-            "sweep-stop" => st.sweep_stop(),
-            "sweep-del" => st.sweep_del(),
+            // The weaker arm, and labelled as such. Until this existed the
+            // right rail showed four invented numbers under the same heading.
+            "cross-run" => {
+                match crate::nexus::run_cross() {
+                    Ok(job) => {
+                        let m = format!("cross-sim started — {}", job.arm);
+                        self.cross = Some(job);
+                        self.st.toast(m);
+                    }
+                    Err(e) => self.st.toast(e),
+                }
+                self.sync_all(cx);
+                return;
+            }
+            // Abandon rather than cancel, and the toast says "abandoned" for
+            // that reason: the engine's sweep thread has no cancellation, so
+            // it runs to completion in the background. Dropping the job here
+            // stops this console reading it and keeps the partial surface,
+            // which is evidence.
+            "sweep-stop" => {
+                st.sweep_stop();
+                self.real_proc = None;
+            }
+            "sweep-del" => {
+                st.sweep_del();
+                self.real_proc = None;
+            }
             "cell-inspect" => st.cell_inspect(),
             "cell-scene" => st.cell_scene(),
             "clear-cell" => st.cell_phys = None,

@@ -436,6 +436,9 @@ pub fn modal_ok(app: &mut App, cx: &mut Cx) {
             let name = if name.is_empty() { "crouch-v4".into() } else { name };
             let warm = ["Resume latest — ck-2100k", "From promoted — crouch-v2-final", "Fresh"][app.warm_sel.min(2)];
             app.st.launch(&name, warm);
+            // Launch means launch. The row above records what was configured;
+            // this starts the engine that fills it.
+            app.begin_launched_run(cx);
         }
         AppModal::Rerun => {
             let name = host.widget(cx, ids!(panel.in_wrap0.input0)).text();

@@ -961,11 +961,9 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                     sp.act_ids = vec!["sweep-stop"];
                 }
                 _ => {
-                    sp.acts = vec![(tt("▶ run sweep"), false)];
-                    sp.act_ids = vec!["sweep-run"];
-                    if crate::nexus::can_sweep() && app.real_proc.is_none() {
-                        sp.acts.push((tt("▶ real sweep"), false));
-                        sp.act_ids.push("real-sweep");
+                    if crate::nexus::can_sweep() {
+                        sp.acts = vec![(tt("▶ run sweep"), false)];
+                        sp.act_ids = vec!["sweep-run"];
                     }
                     if st.sweep_grid.is_some() {
                         sp.acts.push((tt("delete result"), true));
@@ -974,6 +972,12 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                 }
             }
             specs.push(sp);
+            if !crate::nexus::can_sweep() && st.sweep_state != SweepState::Running {
+                specs.push(LSpec {
+                    note: Some(tt("No checkpoint to sweep yet — train one first.")),
+                    ..Default::default()
+                });
+            }
 
             // Sim-to-sim. The sweep varies physics inside one engine; this runs
             // the same policy in a different one. Only the second can catch a
@@ -1002,6 +1006,27 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                 }
                 // Say why rather than offer a control that fails when pressed.
                 Some(why) => specs.push(LSpec { note: Some(why), ..Default::default() }),
+            }
+
+            // The weaker arm, offered separately and described as weaker. Both
+            // its columns share the dynamics function, so it can only catch a
+            // disagreement about how the equations were stepped.
+            {
+                let mut cp = LSpec::default();
+                if app.cross.as_ref().is_some_and(|j| j.running()) {
+                    cp.acts = vec![(tt("running…"), false)];
+                    cp.act_ids = vec!["cross-busy"];
+                } else {
+                    cp.acts = vec![(tt("▶ cross-sim"), false)];
+                    cp.act_ids = vec!["cross-run"];
+                }
+                specs.push(cp);
+                specs.push(LSpec {
+                    note: Some(tt(
+                        "Same equations, stepped two ways — catches integrator dependence, not modelling error.",
+                    )),
+                    ..Default::default()
+                });
             }
             (head, None, specs)
         }

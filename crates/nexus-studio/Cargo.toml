@@ -13,6 +13,9 @@ path = "src/main.rs"
 # The engine, linked rather than spawned: the console draws the same physics
 # it computes, in the same process.
 nexus-engine = { workspace = true }
+# The mjvScene bridge: NEXUS_MJCF renders a MuJoCo model through the stage's
+# own renderer. Builds to a stub on machines without the MuJoCo wheel.
+nexus-mujoco = { path = "../nexus-mujoco" }
 makepad-widgets = { workspace = true }
 makepad-plot = { path = "../makepad-plot" }
 dorobot-ux = { workspace = true }

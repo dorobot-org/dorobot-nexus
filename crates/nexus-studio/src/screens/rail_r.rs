@@ -281,11 +281,45 @@ pub fn build_right_specs(app: &App) -> Vec<RSpec> {
             out.push(btns(vec![(tt("● record"), "record-probe".into(), true, false)]));
         }
         Mode::Validate => {
-            out.push(cap(caps(&tt("Sim-to-sim"))));
-            out.push(mono(format!("{}   dec 4: 0.84   dec 1: 0.79   Δ −6%", tt("survival"))));
-            out.push(mono(format!("{}   dec 4: 0.71   dec 1: 0.68   Δ −4%", tt("tracking"))));
-            out.push(mono(format!("{}   dec 4: 0.55   dec 1: 0.49   Δ −11%", tt("reward"))));
-            out.push(ver(1.0, tt("Worst gap 11%. Shares the dynamics function — catches integrator dependence, not modelling error.")));
+            // These four numbers were literals until this was wired: the panel
+            // claimed a decimation comparison that nothing had computed, and
+            // sat beside the real MuJoCo result under the same heading. An
+            // unrun arm now says it has not run.
+            out.push(cap(caps(&tt("Cross-sim · same physics"))));
+            match app.cross.as_ref() {
+                None => out.push(txt(tt("Not run. Start it from the left rail."))),
+                Some(job) => {
+                    let (label, done, gap, rows) = job.view();
+                    out.push(mono(format!("{} · {}", tt("arm"), job.arm)));
+                    if rows.is_empty() {
+                        out.push(txt(tt("starting…")));
+                    }
+                    for (name, a, b, d) in &rows {
+                        // Dashes while it runs: the report is zeroed until the
+                        // arm returns, and 0.000 would read as a measurement.
+                        if job.running() {
+                            out.push(mono(format!("{}   {}: —   {}: —", tt(name), job.col_a, job.col_b)));
+                        } else {
+                            out.push(mono(format!(
+                                "{}   {}: {a}   {}: {b}   Δ {d}",
+                                tt(name), job.col_a, job.col_b
+                            )));
+                        }
+                    }
+                    if job.running() {
+                        out.push(ver(0.0, tt("Running — both columns step the same equations.")));
+                    } else if done {
+                        out.push(ver(1.0, format!(
+                            "{} {:.0}%. {}",
+                            tt("Worst gap"),
+                            gap * 100.0,
+                            tt("Shares the dynamics function — catches integrator dependence, not modelling error.")
+                        )));
+                    } else {
+                        out.push(ver(2.0, label));
+                    }
+                }
+            }
             out.push(cap(caps(&tt("vs crouch-v2"))));
             if st.sweep_baseline {
                 let p = if st.sweep_grid.is_some() { format!("{}%", st.sweep_pass()) } else { "—".into() };

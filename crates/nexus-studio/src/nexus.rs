@@ -287,16 +287,30 @@ impl RealProc {
         self.done.load(Ordering::Relaxed)
     }
 
-    /// The sweep surface in the shape the heat map takes: rows of cells, `None`
-    /// where unmeasured. Read live, so the grid fills in cell by cell.
-    pub fn grid(&self) -> Option<Vec<Vec<Option<f64>>>> {
+    /// The sweep surface and how many cells it has measured.
+    ///
+    /// Returned in the store's own grid shape rather than a fresh one: the
+    /// engine's surface is 5 × 8 and so is `Store::sweep_grid`, so the real
+    /// result lands in the field every existing consumer already reads — cell
+    /// selection, the pass percentage, the heat map, "open in Inspect". A
+    /// parallel grid beside it was how the screen ended up with two surfaces
+    /// and a branch deciding which was showing.
+    pub fn grid(&self) -> Option<([[Option<f64>; 8]; 5], usize)> {
         use nexus_engine::sweep::{COLS, ROWS};
         let s = self.surface.as_ref()?.lock().ok()?;
-        Some(
-            (0..ROWS)
-                .map(|r| (0..COLS).map(|c| s.cell(r, c).map(f64::from)).collect())
-                .collect(),
-        )
+        let mut g = [[None; COLS]; ROWS];
+        for (r, row) in g.iter_mut().enumerate() {
+            for (c, cell) in row.iter_mut().enumerate() {
+                *cell = s.cell(r, c).map(f64::from);
+            }
+        }
+        Some((g, s.done))
+    }
+
+    /// What the surface says it varied, for the axis caption.
+    pub fn axes(&self) -> Option<String> {
+        let s = self.surface.as_ref()?.lock().ok()?;
+        (!s.axes.is_empty()).then(|| s.axes.clone())
     }
 
     /// Ask a training run to stop at the next interval.
@@ -508,6 +522,73 @@ pub fn run_mujoco(ckpt: &str, command_vx: f32, seconds: u32) -> Result<MjRun, St
     Ok(MjRun { report, rollout, replayed: false })
 }
 
+// ------------------------------------------------------ cross-sim (same physics) --
+
+/// One policy run in two implementations of the *same* physics.
+///
+/// The weaker of the two sim-to-sim checks, and the screen has to say so: both
+/// columns share the dynamics function, so a disagreement means the answer
+/// depends on how the equations were stepped. That is worth knowing and is not
+/// the check that predicts transfer — only a different engine can catch a
+/// modelling error, which is what the MuJoCo arm is for.
+pub struct CrossRun {
+    pub report: Arc<Mutex<nexus_engine::crosssim::Report>>,
+    /// Which arm ran. The two arms compare different things, and a panel that
+    /// did not say which was running is what this replaced.
+    pub arm: &'static str,
+    pub col_a: &'static str,
+    pub col_b: &'static str,
+}
+
+impl CrossRun {
+    pub fn running(&self) -> bool {
+        self.report.lock().map(|r| r.running).unwrap_or(false)
+    }
+
+    /// Status line, done flag, worst gap, and the four measured rows as
+    /// (metric, a, b, delta).
+    pub fn view(&self) -> (String, bool, f32, Vec<(&'static str, String, String, String)>) {
+        match self.report.lock() {
+            Ok(r) => (
+                r.label.clone(),
+                r.done,
+                r.worst_gap(),
+                r.rows().iter().cloned().collect(),
+            ),
+            Err(_) => (String::new(), false, 0.0, Vec::new()),
+        }
+    }
+}
+
+/// Start the cross-sim arm, preferring the one that measures the real robot.
+///
+/// zealot's arm drives the G1 at two control decimations; the built-in arm
+/// steps the cart-pole with Euler against Runge-Kutta. Both are honest, they
+/// answer different questions, and which one ran is carried out with the
+/// result rather than assumed by the screen.
+pub fn run_cross() -> Result<CrossRun, String> {
+    #[cfg(feature = "zealot")]
+    {
+        let ck = nexus_engine::cli::zealot_ckpt_path();
+        if let Some(report) = nexus_engine::crosssim::zealot_cross::spawn(&ck) {
+            return Ok(CrossRun {
+                report,
+                arm: "zealot · G1 · control decimation",
+                col_a: "dec 4",
+                col_b: "dec 1",
+            });
+        }
+    }
+    let report = nexus_engine::crosssim::spawn(nexus_engine::trainer::RUN_ID)
+        .ok_or_else(|| "no checkpoint to cross-check".to_string())?;
+    Ok(CrossRun {
+        report,
+        arm: "built-in · cart-pole · integrator",
+        col_a: "euler",
+        col_b: "rk4",
+    })
+}
+
 /// An engine rollout in the shape the 3D view replays.
 pub fn replay_from(r: &nexus_engine::zealot::Rollout, name: &str) -> Replay {
     Replay {
@@ -517,6 +598,44 @@ pub fn replay_from(r: &nexus_engine::zealot::Rollout, name: &str) -> Replay {
         base: r.base.clone(),
         dt: r.dt as f64,
     }
+}
+
+/// A Train-mode policy preview in flight: the checkpoint the run is
+/// producing, rolled out on the scene the stage shows. The slot fills on a
+/// worker thread because `zealot::drive` blocks for seconds.
+pub struct PreviewJob {
+    pub slot: nexus_engine::zealot::RolloutSlot,
+    pub done: Arc<AtomicBool>,
+}
+
+/// Roll `ckpt` out on `scene`'s physics in the background.
+///
+/// `None` when the drive binary is not on this machine; the caller treats
+/// that as "nothing to preview" rather than an error, the same stance the
+/// sim-to-sim arms take.
+pub fn spawn_preview(ckpt: &str, scene: &UiScene) -> Option<PreviewJob> {
+    if !nexus_engine::zealot::drive_path().is_file() {
+        return None;
+    }
+    let mut knobs = from_ui(scene).knobs();
+    // Deterministic spawn: successive previews should differ by policy, not
+    // by starting-state luck — the same override the sweep and cross-sim
+    // make when they measure.
+    knobs.push(("BIPED_SPAWN_DR", "0".into()));
+    let ckpt = ckpt.to_string();
+    let job = PreviewJob {
+        slot: nexus_engine::zealot::RolloutSlot::default(),
+        done: Arc::new(AtomicBool::new(false)),
+    };
+    let (slot, done) = (job.slot.clone(), Arc::clone(&job.done));
+    std::thread::spawn(move || {
+        // Long enough to read a gait, short enough that the preview keeps up
+        // with the checkpoints as they are written.
+        let cmd = nexus_engine::zealot::Drive { vx: 0.3, seconds: 6.0, ..Default::default() };
+        slot.set(nexus_engine::zealot::drive(&ckpt, cmd, &knobs));
+        done.store(true, Ordering::Relaxed);
+    });
+    Some(job)
 }
 
 #[cfg(test)]
