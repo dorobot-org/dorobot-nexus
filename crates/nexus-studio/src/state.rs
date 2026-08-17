@@ -351,6 +351,15 @@ pub struct Live {
     pub lr: String,
     pub hist: Vec<f64>,
     pub now_hist: Vec<f64>,
+    /// True while these numbers come from a real trainer (spawned or
+    /// attached): `train_tick`'s demo motion must not touch them, and the
+    /// tiles hide the fields the real stream does not carry.
+    pub real: bool,
+    /// Real steps/second, from the trainer's metric stream.
+    pub sps: f64,
+    /// Full-run reward history (decimated when long) — the training curve,
+    /// where `hist` is only the recent window.
+    pub hist_full: Vec<f64>,
 }
 
 // -------------------------------------------------------------- app-level --
@@ -700,6 +709,8 @@ impl Store {
                 playing: true, frame: 184, frames: 301, now: 0.641,
                 reward: -0.2604, falls: 16.6, kl: 0.0103, lr: "7.6e-5".into(),
                 hist, now_hist,
+                real: false, sps: 0.0,
+                hist_full: vec![],
             },
             cell_phys: None,
             sweep_grid: None,

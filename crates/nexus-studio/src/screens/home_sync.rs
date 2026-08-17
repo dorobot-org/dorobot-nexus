@@ -59,12 +59,27 @@ pub fn sync_home(app: &mut App, cx: &mut Cx) {
             Some(r) => {
                 let goal = r.snapshot.cfg.get(r.stage).map(|c| c.stance).unwrap_or(0.62);
                 let gap = st.live.now - goal;
-                let bits: [(String, String); 4] = [
-                    (tt("policy"), r.name.clone()),
-                    (tt("goal"), format!("{goal:.2} m")),
-                    (tt("now"), format!("{:.3} m", st.live.now)),
-                    (tt("gap"), format!("{}{:.3}", if gap >= 0.0 { "+" } else { "−" }, gap.abs())),
-                ];
+                // A real run's headline is the training curve, not the stance
+                // demo: best/current reward and the iteration budget.
+                let best = st.live.hist_full.iter().cloned().fold(f64::MIN, f64::max);
+                let bits: [(String, String); 4] = if st.live.real {
+                    [
+                        (tt("policy"), r.name.clone()),
+                        (
+                            "best".to_string(),
+                            if best > f64::MIN { format!("{best:.4}") } else { "—".into() },
+                        ),
+                        (tt("now"), format!("{:.4}", st.live.reward)),
+                        ("iter".to_string(), format!("{}/{}", r.iter, r.iters_per)),
+                    ]
+                } else {
+                    [
+                        (tt("policy"), r.name.clone()),
+                        (tt("goal"), format!("{goal:.2} m")),
+                        (tt("now"), format!("{:.3} m", st.live.now)),
+                        (tt("gap"), format!("{}{:.3}", if gap >= 0.0 { "+" } else { "−" }, gap.abs())),
+                    ]
+                };
                 for (i, bp) in [ids!(bits.b0), ids!(bits.b1), ids!(bits.b2), ids!(bits.b3)].iter().enumerate() {
                     let b = hero.widget(cx, *bp);
                     if b.is_empty() {
@@ -73,8 +88,15 @@ pub fn sync_home(app: &mut App, cx: &mut Cx) {
                     set_label(cx, &b, ids!(k), &caps(&bits[i].0), l);
                     set_label(cx, &b, ids!(v), &bits[i].1, l);
                 }
-                hero.spark(cx, ids!(goal_chart)).set(cx, &st.live.now_hist, Some(goal), 1, l);
-                set_label(cx, &hero, ids!(goal_note), &tt("stance · actual chasing target"), l);
+                if st.live.real {
+                    hero.spark(cx, ids!(goal_chart)).set(cx, &st.live.hist_full, None, 1, l);
+                } else {
+                    hero.spark(cx, ids!(goal_chart)).set(cx, &st.live.now_hist, Some(goal), 1, l);
+                }
+                {
+                    let note = if st.live.real { tt("reward · whole run") } else { tt("stance · actual chasing target") };
+                    set_label(cx, &hero, ids!(goal_note), &note, l);
+                }
                 let mut segs: Vec<(f64, SegTone)> = vec![];
                 for i in 0..r.stages.len() {
                     segs.push((1.0, if i < r.stage { SegTone::Ok } else if i == r.stage { SegTone::Vio } else { SegTone::Sink }));
@@ -93,7 +115,7 @@ pub fn sync_home(app: &mut App, cx: &mut Cx) {
                 let hvals = [
                     (tt("reward"), format!("{:.4}", st.live.reward)),
                     (tt("falls"), format!("{:.1}%", st.live.falls)),
-                    ("steps/s".to_string(), "3,151".to_string()),
+                    ("steps/s".to_string(), if st.live.real { format!("{:.0}", st.live.sps) } else { "3,151".to_string() }),
                 ];
                 for (i, tp) in [ids!(htiles.h0), ids!(htiles.h1), ids!(htiles.h2)].iter().enumerate() {
                     let tile = hero.widget(cx, *tp);

@@ -753,6 +753,121 @@ pub fn spawn(envs: usize, iters: u64, ckpt: &str) -> Option<Handle> {
     Some(Handle::external(shared, tx))
 }
 
+/// Attach to an already-running (or finished) trainer by tailing its log,
+/// instead of spawning one. Same metric stream, different producer: the
+/// console becomes an **observer** of a run it does not own — launched from a
+/// shell, on another env count, or hours ago — which `spawn` cannot give
+/// because the child's stdout belongs to whoever started it.
+///
+/// Read-only by design: a Stop from the console detaches the tail thread and
+/// nothing else. Killing a training run this process did not start is not a
+/// power a viewer should have.
+///
+/// The whole log is replayed first (the curve shows the run so far, not just
+/// what arrives after the window opens), then the tail polls for appended
+/// lines. `running` turns false only when the log has been silent for three
+/// minutes — the trainer prints every iteration, so silence that long means
+/// the run ended or died; either way there is nothing more to stream.
+pub fn attach_log(path: &str) -> Option<Handle> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(path).ok()?;
+
+    let shared = Arc::new(Mutex::new(Shared {
+        samples: Vec::new(),
+        running: true,
+        envs: 0,
+        total_steps: 0,
+    }));
+    let (tx, rx) = mpsc::channel();
+    let s = Arc::clone(&shared);
+
+    thread::spawn(move || {
+        let mut pending = Row::default();
+        let mut cumulative: u64 = 0;
+        let mut buf = String::new();
+        let mut carry = String::new();
+        let mut pos = 0u64;
+        let mut quiet_polls = 0u32;
+
+        loop {
+            buf.clear();
+            let fresh = file
+                .seek(SeekFrom::Start(pos))
+                .ok()
+                .and_then(|_| file.read_to_string(&mut buf).ok())
+                .unwrap_or(0);
+            pos += fresh as u64;
+
+            if fresh == 0 {
+                // Detached by the console, or the run has been silent so long
+                // it must be over. 720 polls x 250 ms = 3 minutes.
+                quiet_polls += 1;
+                if rx.try_recv().is_ok() || quiet_polls > 720 {
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_millis(250));
+                continue;
+            }
+            quiet_polls = 0;
+
+            // Lines can arrive split across reads; hold the tail fragment.
+            carry.push_str(&buf);
+            let complete = match carry.rfind('\n') {
+                Some(i) => {
+                    let head = carry[..=i].to_string();
+                    carry = carry[i + 1..].to_string();
+                    head
+                }
+                None => continue,
+            };
+
+            for line in complete.lines() {
+                if let Some(row) = parse_row(line) {
+                    pending = row;
+                } else if let Some(rb) = parse_rb(line) {
+                    cumulative += rb.samples;
+                    let sample = Sample {
+                        step: cumulative,
+                        reward: pending.reward,
+                        terms: TERMS.iter().map(|t| rb.term(t)).collect(),
+                        fall_rate: if rb.samples > 0 {
+                            rb.fell as f32 / rb.samples as f32
+                        } else {
+                            0.0
+                        },
+                        steps_per_sec: if pending.secs > 0.0 {
+                            rb.samples as f64 / pending.secs
+                        } else {
+                            0.0
+                        },
+                        episode_len: 0.0,
+                        leans: Vec::new(),
+                    };
+                    if let Ok(mut g) = s.lock() {
+                        // zealot emits 24 steps per env per iteration, so the
+                        // population of the observed run — which attach cannot
+                        // be told, unlike spawn — is read off the stream itself.
+                        if g.envs == 0 && rb.samples > 0 {
+                            g.envs = (rb.samples / 24) as usize;
+                        }
+                        g.samples.push(sample);
+                        g.total_steps = cumulative;
+                        if g.samples.len() > 600 {
+                            g.samples.drain(0..100);
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(mut g) = s.lock() {
+            g.running = false;
+        }
+    });
+
+    Some(Handle::external(shared, tx))
+}
+
 /// One row of zealot's metric table:
 /// `iter curr step_rew falls torso_z lr kl sec`
 #[derive(Default, Clone, Copy)]

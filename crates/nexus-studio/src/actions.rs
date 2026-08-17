@@ -1229,6 +1229,48 @@ impl Store {
         self.toasts.retain(|t| now - t.born < if t.undo.is_some() { 6.0 } else { 3.2 });
     }
 
+    /// Adopt a real training run (spawned or attached) as a first-class Run
+    /// row: everything the mock rows have, but its numbers arrive from the
+    /// metric stream instead of `train_tick`'s demo motion.
+    pub fn adopt_real_run(&mut self, name: &str, stage: &str, iters_per: u32) {
+        for r in &mut self.runs {
+            if r.state == RunState::Running {
+                r.state = RunState::Stopped;
+            }
+        }
+        let id = self.nid("run");
+        self.runs.insert(0, Run {
+            id: id.clone(),
+            name: name.into(),
+            set: "attached".into(),
+            state: RunState::Running,
+            archived: false,
+            coll: false,
+            steps: 0.0,
+            best: None,
+            stage: 0,
+            stages: vec![stage.into()],
+            round: 1,
+            iter: 0,
+            iters_per,
+            snapshot: Snapshot {
+                scenes: 1,
+                seed: std::env::var("BIPED_DRIVE_SEED").unwrap_or_else(|_| "-".into()),
+                warm: None,
+                cfg: vec![],
+            },
+            ckpts: vec![],
+            diagnosis: None,
+        });
+        self.sel.run = Some(id);
+        self.live.real = true;
+        self.live.hist.clear();
+        self.live.hist_full.clear();
+        self.live.reward = 0.0;
+        self.live.falls = 0.0;
+        self.live.sps = 0.0;
+    }
+
     /// ~1.1s: training progress, checkpoints + retention, rollout telemetry.
     pub fn train_tick(&mut self) {
         // Rollout telemetry + health-gated dwell.
@@ -1250,6 +1292,12 @@ impl Store {
                     self.dg_live.unlocked = true;
                 }
             }
+        }
+        // A real run's numbers arrive from the metric stream in
+        // `drain_real_proc`; the demo motion below would overwrite them with
+        // fiction, which is precisely what this console must never do.
+        if self.live.real {
+            return;
         }
         let Some(run_id) = self.runs.iter().find(|r| r.state == RunState::Running).map(|r| r.id.clone()) else {
             return;
