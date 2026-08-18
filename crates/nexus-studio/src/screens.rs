@@ -59,7 +59,31 @@ script_mod! {
             width: Fill height: Fill
             visible: false
             padding: Inset{left: 2. right: 2. top: 2. bottom: 2.}
-            rview := RobotView{ width: Fill height: Fill }
+            rview := RobotView{
+                width: Fill height: Fill
+                // This console's look, set HERE rather than defaulted in the
+                // widget (a widget default repaints every other embedder):
+                // the MuJoCo menagerie palette — blue-grey gradient sky,
+                // dark checker floor, light cell edges.
+                sky_horizon: #x26404F
+                sky_zenith: #x4D80B3
+                ground_color: #x334D66
+                ground2_color: #x1A3350
+                grid_color: #xB3B3B3
+                // Matte floor, stated rather than inherited. This was 0.22,
+                // which is not a reflectance: the widget implements it by
+                // drawing the robot a second time mirrored through the ground
+                // and blending it at that alpha, with no Fresnel, no blur,
+                // and nothing else in the scene reflected. It also went
+                // unclipped at the floor plane, so a robot dipping below the
+                // ground — routine for a checkpoint that falls — mirrored
+                // into a ghost standing on it.
+                //
+                // The scene this console validates against agrees: the
+                // playground G1 flat-terrain XML sets reflectance="0". Only
+                // the *_pretty variants use 0.2.
+                floor_reflectance: 0.0
+            }
         }
 
         robot := View{
