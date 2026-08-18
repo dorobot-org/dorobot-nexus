@@ -26,7 +26,7 @@ makepad-app-shell = { git = "https://github.com/mofa-org/makepad-flex-layout", r
 # checker ground, mirror floor, headlight, smooth normals, base-pose and
 # terrain APIs) that the MuJoCo rollout replay needs —
 # dorobot-org/makepad-urdf-viewer#2. Re-pin to a main-branch rev once that merges.
-makepad-urdf-player = { git = "https://github.com/dorobot-org/makepad-urdf-viewer", rev = "3d21b0e94e3c5f8a231368b38853d1de14d55ef2" }
+makepad-urdf-player = { git = "https://github.com/dorobot-org/makepad-urdf-viewer", rev = "7f0221d06059df1ec9707f1efa0184106fddedd3" }
 rfd = "0.15"
 
 [profile.release]
