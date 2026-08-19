@@ -1,0 +1,27 @@
+[package]
+name = "nexus-studio"
+description = "The lifecycle console: makepad port of the approved dorobot-nexus mockup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nexus-studio"
+path = "src/main.rs"
+
+[dependencies]
+# The engine, linked rather than spawned: the console draws the same physics
+# it computes, in the same process.
+nexus-engine = { workspace = true }
+# The mjvScene bridge: NEXUS_MJCF renders a MuJoCo model through the stage's
+# own renderer. Builds to a stub on machines without the MuJoCo wheel.
+nexus-mujoco = { path = "../nexus-mujoco" }
+makepad-widgets = { workspace = true }
+makepad-plot = { path = "../makepad-plot" }
+dorobot-ux = { workspace = true }
+makepad-urdf-player = { workspace = true }
+rfd = { workspace = true }
+objc = "0.2"
+
+[features]
+zealot = ["nexus-engine/zealot"]

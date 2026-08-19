@@ -1,0 +1,9 @@
+[package]
+name = "nexus-mujoco"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "mjvScene bridge: load an MJCF with the real libmujoco and hand its abstract visualization scene to a renderer"
+
+[dependencies]
+libloading = "0.8"

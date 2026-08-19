@@ -1,0 +1,50 @@
+diff --git a/src/bin/biped_train_gpu.rs b/src/bin/biped_train_gpu.rs
+index 8ebfbc3..edee24e 100644
+--- a/src/bin/biped_train_gpu.rs
++++ b/src/bin/biped_train_gpu.rs
+@@ -757,7 +757,14 @@ fn main() {
+         // grad tensor into a slot of `sqn`, single tiny readback per
+         // minibatch) + per-shape scale tensors for the (rare) clip events.
+         let red = Reduce::from_backend(&bk).unwrap();
+-        let mut sqn = mk(&bk, &DMatrix::<f32>::zeros(1, 32), rw);
++        // One slot per grad tensor, but strided so every slot starts on a
++        // 256-byte boundary. Each SqNorm reduce binds its slot as a storage
++        // buffer, and Metal enforces `min_storage_buffer_offset_alignment` =
++        // 256: packed f32 columns put slot 1 at byte offset 4 and wgpu
++        // rejected the bind group outright. Vulkan asks for 16-32, which is
++        // why the WebGPU grad-clip leg passed there and not here.
++        const GC_STRIDE: usize = 64; // 64 * 4 B = 256 B
++        let mut sqn = mk(&bk, &DMatrix::<f32>::zeros(1, 32 * GC_STRIDE), rw);
+         let (mut gc_scales, mut gc_lens): (Vec<Tensor<f32>>, Vec<usize>) = (vec![], vec![]);
+         let mut gc_slots = 0usize;
+         if grad_clip > 0.0 {
+@@ -1366,7 +1373,7 @@ fn main() {
+                                         &mut p,
+                                         ReduceVariant::SqNorm,
+                                         t,
+-                                        sqn.columns_mut(slot, 1),
++                                        sqn.columns_mut(slot * GC_STRIDE as u32, 1),
+                                     )
+                                     .unwrap();
+                                     slot += 1;
+@@ -1378,14 +1385,18 @@ fn main() {
+                                 &mut p,
+                                 ReduceVariant::SqNorm,
+                                 &dls,
+-                                sqn.columns_mut(slot, 1),
++                                sqn.columns_mut(slot * GC_STRIDE as u32, 1),
+                             )
+                             .unwrap();
+                         }
+                         cur.flush();
+                         bk.synchronize().unwrap();
+                         let sums = bk.slow_read_vec(sqn.buffer()).await.unwrap();
+-                        let norm = sums[..gc_slots].iter().sum::<f32>().sqrt();
++                        // Slots are strided, so read every GC_STRIDE-th float.
++                        let norm = (0..gc_slots)
++                            .map(|i| sums[i * GC_STRIDE])
++                            .sum::<f32>()
++                            .sqrt();
+                         if norm > grad_clip {
+                             let sc = grad_clip / norm;
+                             for (buf, len) in gc_scales.iter_mut().zip(gc_lens.iter()) {

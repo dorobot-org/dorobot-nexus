@@ -1,36 +1,33 @@
-[package]
-name = "dorobot-nexus"
+[workspace]
+resolver = "2"
+members = [
+    "crates/nexus-engine",
+    "crates/nexus-mujoco",
+    "crates/nexus-studio",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "Native training studio for GPU reinforcement learning on humanoids"
+license = "MIT"
 
-[[bin]]
-name = "dorobot-nexus"
-path = "src/main.rs"
-required-features = ["app"]
+[workspace.dependencies]
+nexus-engine = { path = "crates/nexus-engine" }
 
-[features]
-# The full application. Off (default-features = false), only the dependency-
-# free artifact-schema library builds — the surface other products consume.
-default = ["app"]
-app = ["dep:makepad-widgets", "dep:makepad-app-shell", "dep:makepad-urdf-player", "dep:log", "dep:env_logger"]
+# The shared visual language, from the dorobot-studio repository. Only the
+# console uses it; nexus-engine depends on nothing at all, so the engine's
+# bare-clone property survives this even though the full workspace no longer
+# has it.
+dorobot-ux = { path = "../dorobot-studio/crates/dorobot-ux" }
 
-# Drives zealot's GPU biped trainer instead of the built-in CPU learner. It
-# adds no dependencies on purpose — zealot is a subprocess, not a crate — so
-# this flag only compiles the client that reads its metric stream, and a clean
-# clone still builds with nothing but a Rust toolchain. Build the stack with
-# scripts/setup-zealot.sh; without it the app falls back to the CPU trainer.
-zealot = []
-
-[dependencies]
-makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev", optional = true }
-# The panel shell and the URDF viewer are shared with DoRobot Studio. Nothing
-# else is: the two products meet at an artifact boundary, not a code boundary,
-# so the dataset and video machinery stays out of this tree.
-makepad-app-shell = { git = "https://github.com/mofa-org/makepad-flex-layout", rev = "78425b1", optional = true }
-makepad-urdf-player = { git = "https://github.com/dorobot-org/makepad-urdf-viewer", rev = "24bfa8f", optional = true }
-log = { version = "0.4", optional = true }
-env_logger = { version = "0.11", optional = true }
+makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev" }
+makepad-app-shell = { git = "https://github.com/mofa-org/makepad-flex-layout", rev = "78425b1" }
+# Pinned to the renderer upgrade (registered shadows, menagerie palette,
+# checker ground, mirror floor, headlight, smooth normals, base-pose and
+# terrain APIs) that the MuJoCo rollout replay needs —
+# dorobot-org/makepad-urdf-viewer#2. Re-pin to a main-branch rev once that merges.
+makepad-urdf-player = { git = "https://github.com/dorobot-org/makepad-urdf-viewer", rev = "283d303df6d3e158bac2c281a190ac1f749b5bd5" }
+rfd = "0.15"
 
 [profile.release]
 opt-level = 3
