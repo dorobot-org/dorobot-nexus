@@ -49,6 +49,12 @@ use makepad_widgets::*;
 mod shell {
     use super::*;
     app_main!(App);
+
+    pub fn run() {
+        // The generated entry owns the HAL's main-thread window loop.
+        // Calling app_main directly only works for offscreen windows.
+        main();
+    }
 }
 
 fn main() {
@@ -61,7 +67,7 @@ fn main() {
     }
     // Never returns if a headless flag was given.
     nexus_engine::cli::maybe_headless();
-    shell::app_main();
+    shell::run();
 }
 
 script_mod! {
