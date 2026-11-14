@@ -80,8 +80,15 @@ def main():
                                 "--", str(dataset)], cwd=PROJECT, check=True)
             args = ["--dataset", str(dataset), "--screen", "play", *args]
         else:
-            args = ["--robot", "data/adora_nano/adora_nano.urdf", *args]
+            args = ["--robot", str(PROJECT / "data/adora_nano/adora_nano.urdf"), *args]
         mode = "run"
+    # Workspace recovery may change cwd before the UI handles startup args.
+    # Resolve model paths against the launcher's project while that is known.
+    if "--robot" in args:
+        index = args.index("--robot") + 1
+        if index < len(args):
+            model = Path(args[index]).expanduser()
+            args[index] = str(model if model.is_absolute() else PROJECT / model)
     command = [str(binary), mode, "--allow-c", CONFIG["package"], "--bin", CONFIG["binary"]]
     if CONFIG.get("optional_video") and not video:
         command.append("--no-default-features")
