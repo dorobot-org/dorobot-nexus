@@ -23,10 +23,10 @@ script_mod! {
             light: instance(0.0) on: instance(0.0) hover: instance(0.0)
             dimmed: instance(0.0) frac: instance(0.0)
             pixel: fn() {
-                let base=mix(#x141312,#xFBFAF8,self.light)
-                let selected=mix(#x2A1708,#xF7E4D8,self.light)
+                let base=mix(#x1C1C1E,#xFFFFFF,self.light)
+                let selected=mix(#x19334D,#xE5F0FF,self.light)
                 let fill=mix(base,selected,max(self.on,self.hover*0.4))
-                let accent=mix(#xEF6F2E,#xD15010,self.light)
+                let accent=mix(#x0A84FF,#x007AFF,self.light)
                 return mix(fill,accent,step(self.pos.x*self.rect_size.x,2.0)*self.on)
             }
         }
@@ -35,7 +35,7 @@ script_mod! {
             draw_text +: {
                 light: instance(0.0) dimmed: instance(0.0)
                 text_style: mod.widgets.nx.T_BODY{}
-                get_color: fn(){return mix(mix(#xF2F0EC,#x161413,self.light),mix(#x6B625B,#x7A7169,self.light),self.dimmed)}
+                get_color: fn(){return mix(mix(#xF5F5F7,#x1C1C1E,self.light),mix(#x8E8E93,#x8E8E93,self.light),self.dimmed)}
             }
         }
         tg := mod.widgets.nx.BodyLbl{width: Fill height: Fit max_lines: 2 text_overflow: Ellipsis}
@@ -63,7 +63,7 @@ script_mod! {
                 // vignette
                 let d = length(uv - vec2(0.5, 0.55))
                 let vig = smoothstep(0.9, 0.35, d) * 0.06 + 0.94
-                let edge = mix(#x2A2725, #xD8D4CF, self.light)
+                let edge = mix(#x38383A, #xD1D1D6, self.light)
                 let bx = px.x
                 let by = px.y
                 let on_edge = max(
@@ -75,7 +75,7 @@ script_mod! {
                 let armx = step(abs(iy), 1.1) * step(0.0, ix) * step(ix, 11.0)
                 let army = step(abs(ix), 1.1) * step(0.0, iy) * step(iy, 11.0)
                 let tick = max(armx, army)
-                let vio = mix(#xEF6F2E, #xD15010, self.light)
+                let vio = mix(#x0A84FF, #x007AFF, self.light)
                 let c2 = mix(c * vec4(vig, vig, vig, 1.0), vio, tick * 0.85)
                 return mix(c2, edge, on_edge)
             }
@@ -130,8 +130,8 @@ script_mod! {
                     crouch: instance(0.0)
                     pixel: fn() {
                         let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                        let vio = mix(#xEF6F2E, #xD15010, self.light)
-                        let cyc = mix(#x6FA8B8, #x3E7A8C, self.light)
+                        let vio = mix(#x0A84FF, #x007AFF, self.light)
+                        let cyc = mix(#x64D2FF, #x007EAD, self.light)
                         let drop = self.crouch * 14.0
                         // ghost target pose (cyan, offset up by drop)
                         sdf.circle(85.0, 56.0 - 8.0, 10.5)
@@ -140,7 +140,7 @@ script_mod! {
                         sdf.stroke(vec4(cyc.x, cyc.y, cyc.z, 0.3), 2.2)
                         // actual body (orange)
                         sdf.circle(85.0, 42.0 + drop, 11.5)
-                        sdf.fill_keep(mix(#x2A1708, #xF7E4D8, self.light))
+                        sdf.fill_keep(mix(#x19334D, #xE5F0FF, self.light))
                         sdf.stroke(vio, 3.0)
                         sdf.move_to(85.0, 56.0 + drop) sdf.line_to(85.0, 90.0 + drop)
                         sdf.stroke(vio, 3.2)
@@ -187,7 +187,7 @@ script_mod! {
                     draw_text +: {
                         light: instance(0.0)
                         text_style: mod.widgets.nx.T_MONO_S{}
-                        get_color: fn() { return mix(#x6FA8B8, #x3E7A8C, self.light) }
+                        get_color: fn() { return mix(#x64D2FF, #x007EAD, self.light) }
                     }
                 }
             }
@@ -200,7 +200,7 @@ script_mod! {
                     draw_text +: {
                         light: instance(0.0)
                         text_style: mod.widgets.nx.T_MONO_S{}
-                        get_color: fn() { return mix(#xEF6F2E, #xD15010, self.light) }
+                        get_color: fn() { return mix(#x0A84FF, #x007AFF, self.light) }
                     }
                 }
             }
@@ -228,9 +228,9 @@ script_mod! {
                     light: instance(0.0)
                     pixel: fn() {
                         let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                        let fill = mix(#x1B1917, #xFFFFFF, self.light)
-                        let amb = mix(#xF0A330, #xB07514, self.light)
-                        sdf.rect(0.5, 0.5, self.rect_size.x - 1.0, self.rect_size.y - 1.0)
+                        let fill = mix(#x2C2C2E, #xFFFFFF, self.light)
+                        let amb = mix(#xFF9F0A, #x996300, self.light)
+                        sdf.box(0.5, 0.5, self.rect_size.x - 1.0, self.rect_size.y - 1.0, 14.0)
                         sdf.fill_keep(fill)
                         sdf.stroke(amb, 1.0)
                         return sdf.result
@@ -479,9 +479,9 @@ script_mod! {
             light: instance(0.0)
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                let fill = mix(#x141312, #xFBFAF8, self.light)
-                let edge = mix(#x2A2725, #xD8D4CF, self.light)
-                sdf.rect(0.5, 0.5, self.rect_size.x - 1.0, self.rect_size.y - 1.0)
+                let fill = mix(#x1C1C1E, #xFFFFFF, self.light)
+                let edge = mix(#x38383A, #xD1D1D6, self.light)
+                sdf.box(0.5, 0.5, self.rect_size.x - 1.0, self.rect_size.y - 1.0, 14.0)
                 sdf.fill_keep(fill)
                 sdf.stroke(edge, 1.0)
                 return sdf.result
@@ -532,14 +532,14 @@ script_mod! {
                     draw_text +: {
                         light: instance(0.0)
                         text_style: mod.widgets.nx.T_BIG{}
-                        get_color: fn() { return mix(#x6FA8B8, #x3E7A8C, self.light) }
+                        get_color: fn() { return mix(#x64D2FF, #x007EAD, self.light) }
                     }
                 } }
                 b2 := View{ width: Fit height: Fit flow: Down k := mod.widgets.nx.Cap{} v := Label{
                     draw_text +: {
                         light: instance(0.0)
                         text_style: mod.widgets.nx.T_BIG{}
-                        get_color: fn() { return mix(#xEF6F2E, #xD15010, self.light) }
+                        get_color: fn() { return mix(#x0A84FF, #x007AFF, self.light) }
                     }
                 } }
                 b3 := View{ width: Fit height: Fit flow: Down k := mod.widgets.nx.Cap{} v := mod.widgets.nx.MonoLbl{} }
@@ -622,10 +622,10 @@ script_mod! {
             light: instance(0.0)
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                let fill = mix(#x1B1917, #xFFFFFF, self.light)
-                let vio = mix(#xEF6F2E, #xD15010, self.light)
-                let edge = mix(#x2A2725, #xD8D4CF, self.light)
-                sdf.rect(0.5, 0.5, self.rect_size.x - 1.0, self.rect_size.y - 1.0)
+                let fill = mix(#x2C2C2E, #xFFFFFF, self.light)
+                let vio = mix(#x0A84FF, #x007AFF, self.light)
+                let edge = mix(#x38383A, #xD1D1D6, self.light)
+                sdf.box(0.5, 0.5, self.rect_size.x - 1.0, self.rect_size.y - 1.0, 14.0)
                 sdf.fill_keep(fill)
                 sdf.stroke(edge, 1.0)
                 sdf.rect(0.0, 0.0, 2.0, self.rect_size.y)
@@ -658,14 +658,12 @@ script_mod! {
                 light: instance(0.0)
                 pixel: fn() {
                     let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                    let fill = mix(#x141312, #xFBFAF8, self.light)
-                    let edge = mix(#x2A2725, #xD8D4CF, self.light)
-                    let vio = mix(#xEF6F2E, #xD15010, self.light)
-                    sdf.rect(0.5, 0.5, self.rect_size.x - 1.0, self.rect_size.y - 1.0)
+                    let fill = mix(#x1C1C1E, #xFFFFFF, self.light)
+                    let edge = mix(#x38383A, #xD1D1D6, self.light)
+                    let vio = mix(#x0A84FF, #x007AFF, self.light)
+                    sdf.box(0.5, 0.5, self.rect_size.x - 1.0, self.rect_size.y - 1.0, 20.0)
                     sdf.fill_keep(fill)
-                    sdf.stroke(edge, 1.0)
-                    sdf.rect(0.0, 0.0, self.rect_size.x, 2.0)
-                    sdf.fill(vio)
+                    sdf.stroke(edge, 0.5)
                     return sdf.result
                 }
             }
@@ -674,7 +672,7 @@ script_mod! {
                 draw_text +: {
                     light: instance(0.0)
                     text_style: mod.widgets.nx.T_TITLE{}
-                    get_color: fn() { return mix(#xF2F0EC, #x161413, self.light) }
+                    get_color: fn() { return mix(#xF5F5F7, #x1C1C1E, self.light) }
                 }
             }
             sub := mod.widgets.nx.BodyLbl{ visible: false }

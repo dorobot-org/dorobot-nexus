@@ -1178,7 +1178,7 @@ pub fn sync_toasts(app: &mut App, cx: &mut Cx) {
     let l = app.light();
     let paths = [ids!(toasts.t0), ids!(toasts.t1), ids!(toasts.t2)];
     let n = app.st.toasts.len();
-    let show: Vec<&Toast> = app.st.toasts.iter().skip(n.saturating_sub(3)).collect();
+    let show: Vec<&crate::state::Toast> = app.st.toasts.iter().skip(n.saturating_sub(3)).collect();
     for (i, p) in paths.iter().enumerate() {
         let tv = app.ui.widget(cx, *p);
         if tv.is_empty() {

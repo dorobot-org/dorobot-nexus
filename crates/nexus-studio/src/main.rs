@@ -1,5 +1,5 @@
 //! nexus-studio — makepad port of the frozen dorobot-nexus web mockup.
-//! Eight workspaces, factory-industrial theme, EN/中文, light/dark.
+//! Eight workspaces, iOS semantic theme, EN/中文, light/dark.
 
 pub mod actions;
 pub mod artifacts;
@@ -104,8 +104,8 @@ script_mod! {
             on: instance(0.0)
             text_style: mod.widgets.nx.T_BODY{}
             get_color: fn() {
-                let idle = mix(#x948781, #x5E564E, self.light)
-                let ink = mix(#xF2F0EC, #x161413, self.light)
+                let idle = mix(#xAEAEB2, #x636366, self.light)
+                let ink = mix(#xF5F5F7, #x1C1C1E, self.light)
                 return mix(idle, ink, max(self.on, self.hover))
             }
         }
@@ -114,7 +114,7 @@ script_mod! {
             on: instance(0.0)
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                let vio = mix(#xEF6F2E, #xD15010, self.light)
+                let vio = mix(#x0A84FF, #x007AFF, self.light)
                 sdf.rect(0.0, self.rect_size.y - 2.0, self.rect_size.x, 2.0)
                 sdf.fill(mix(vec4(0.0,0.0,0.0,0.0), vio, self.on))
                 return sdf.result
@@ -127,7 +127,7 @@ script_mod! {
             main_window := Window{
                 window.title: "dorobot-nexus"
                 window.inner_size: vec2(1500, 980)
-                pass.clear_color: #x0A0908
+                pass.clear_color: #x000000
 
                 body +: {
                     width: Fill
@@ -148,8 +148,8 @@ script_mod! {
                             draw_bg +: {
                                 light: instance(0.0)
                                 pixel: fn() {
-                                    let base = mix(#x141312, #xFBFAF8, self.light)
-                                    let edge = mix(#x2A2725, #xD8D4CF, self.light)
+                                    let base = mix(#x1C1C1E, #xFFFFFF, self.light)
+                                    let edge = mix(#x38383A, #xD1D1D6, self.light)
                                     let t = step(self.rect_size.y - 1.0, self.pos.y * self.rect_size.y)
                                     return mix(base, edge, t)
                                 }
@@ -354,6 +354,7 @@ pub struct App {
 
 impl AppMain for App {
     fn script_mod(vm: &mut ScriptVm) -> ScriptValue {
+        dorobot_ux::install_ios(vm, crate::preferences::system_light() > 0.5);
         makepad_widgets::script_mod(vm);
         makepad_urdf_player::makepad_xr::script_mod(vm);
         // Nexus supplies its own joint controls. Register only the viewer;
@@ -418,6 +419,9 @@ impl AppMain for App {
         }
         self.match_event(cx, event);
         self.ui.handle_event(cx, event, &mut Scope::empty());
+        if matches!(event, Event::LiveEdit | Event::ScriptReapply) {
+            self.sync_all(cx);
+        }
     }
 }
 
@@ -474,6 +478,11 @@ impl MatchEvent for App {
         });
         if self.st.demo {
             self.st.modal = AppModal::Tour;
+        }
+        // A portable model can be opened directly by the standalone JIT launcher.
+        if let Some(path) = std::env::args().skip_while(|s| s != "--robot").nth(1) {
+            self.import_robot_path(&path);
+            self.st.mode = Mode::Robots;
         }
         self.sync_all(cx);
         // Launched as an observer: attach to the named run immediately and
@@ -670,6 +679,7 @@ impl App {
         self.st.sync_run_metrics();
         self.save_workspace();
         let l = self.light();
+        dorobot_ux::sync_appearance(cx, l > 0.5);
         self.sync_chrome(cx, l);
         crate::screens::sync_mode_frame(self, cx);
         crate::screens::sync_left_rail(self, cx);

@@ -7,3 +7,6 @@ The original loader averages the three URDF mesh scale values and applies a unif
 The importer preserves material and texture resources in portable bundles. The existing viewer shades geometry with URDF/material colors; this patch does not add texture rendering.
 
 Prismatic joints now participate in joint mapping and replay. Their scalar coordinate translates along the joint's local axis after the URDF origin transform; it does not rotate the link. The original code marked them unsupported and omitted them from movable joints. Fixed joints now use only their origin transform, avoiding an unnecessary axis rotation.
+
+The renderer now passes mutable draw variables to `Cx2d::add_instance`, as required by the Makepad revision used by OctoSense/jit.
+The composite shader uses the current `texture.sample` API and normalized RGBA channels.
