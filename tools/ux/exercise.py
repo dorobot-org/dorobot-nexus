@@ -52,6 +52,10 @@ if a.app=='studio':
  if read()['state']['tag']=='Some(Good)':click('page_play.upper.side.side_body.btn_good')
  click('page_play.upper.side.side_body.btn_good');wait(lambda r:r['state']['tag']=='Some(Good)')
  check('tag episode through UI',read()['state']['tag']=='Some(Good)');shot('replay-details-and-tag')
+ cmd('mouse','k=scroll','x=260','y=690','dx=0','dy=120');time.sleep(.4)
+ for _ in range(5):click('signal_next')
+ check('last signal is reachable',read()['controls']['page_play.timeline.tl_body.lanes.content.lane_5']['visible'] and not read()['controls']['page_play.timeline.tl_body.lanes.content.lane_0']['visible']);shot('last-signal')
+ for _ in range(5):click('signal_prev')
  click('nav_library');click('page_library.left_col.header.btn_pull');wait(lambda r:r['state']['hub_open'])
  click('hub_repo');cmd('key','t=sample/preview');key('Escape');wait(lambda r:not r['state']['hub_open'])
  check('cancel transfer form retains episode',read()['state']['episode']==1)
@@ -62,7 +66,7 @@ if a.app=='studio':
 else:
  click('tab2');wait(lambda r:r['state']['mode']=='Robots');robot=read()['state']['robot']
  if read()['state']['inspector_open']:click('inspector_btn')
- check('Nano opened in writable workspace',bool(robot) and read()['state']['workspace_writable'])
+ check('Nano opened in writable workspace',bool(robot) and read()['state']['workspace_writable'] and read()['state']['robot_structure']==[27,26,17,134])
  click('inspector_btn');check('compact details replaces list',read()['controls']['rail_r']['visible'] and not read()['controls']['rail_l']['visible']);shot('nano-details')
  click('help_btn');wait(lambda r:r['state']['modal']!='None');shot('help-dialog');key('Escape')
  wait(lambda r:r['state']['modal']=='None');check('Escape dismisses dialog without changing robot',read()['state']['robot']==robot)

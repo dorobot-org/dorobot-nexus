@@ -764,6 +764,8 @@ impl App {
                 &self.ui,
                 serde_json::json!({
                     "mode": self.st.mode.label(), "theme": format!("{:?}", self.st.theme), "light": self.light(),
+                    "robot_name": self.st.sel.robot.as_ref().and_then(|id| self.st.robots.iter().find(|r| &r.id == id)).map(|r| &r.name),
+                    "robot_structure": self.st.sel.robot.as_ref().and_then(|id| self.st.robots.iter().find(|r| &r.id == id)).map(|r| [r.links, r.joints, r.movable, r.meshes]),
                     "robot": self.st.sel.robot, "robots": self.st.robots.len(), "modal": format!("{:?}", self.st.modal),
                     "workspace_writable": self.workspace_session.is_some(), "robot_animating": self.ui.robot_view(cx, ids!(rview)).is_animating(), "workspace_error": self.workspace_error,
                     "inspector_open": self.inspector_open, "filter": self.st.filter, "picker_pending": self.pending_dialog.is_some()
