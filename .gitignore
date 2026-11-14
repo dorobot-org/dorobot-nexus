@@ -61,3 +61,6 @@ __pycache__/
 /docs/verification-*.json
 /studio-workspace.json
 /robots/
+
+# Local Makepad runner state
+/.makepad-jit/

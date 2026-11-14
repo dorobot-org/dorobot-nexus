@@ -571,10 +571,7 @@ script_mod! {
 // the camera basis (no geometry, no depth interaction) and the scene texture
 // — rendered over an alpha-0 clear — is laid on top.
 //
-// sample_as_bgra returns the render texture already channel-ordered on
-// Metal, but R/B-reversed on WebGL (verified both ways against a rendered
-// warm grid line). Two shader variants, chosen at compile time — only the
-// `scene` line differs.
+// The current HAL normalizes sampled render textures to RGBA on every backend.
 pub mod composite_shader {
     use super::*;
 
@@ -590,7 +587,7 @@ pub mod composite_shader {
             depth_texture: texture_2d(float)
 
             pixel: fn() {
-                let scene = self.scene_texture.sample_as_bgra(self.pos)
+                let scene = self.scene_texture.sample(self.pos)
                 // ---- cavity AO + edges, from depth alone -------------------
                 // A Laplacian on the depth buffer: compare this pixel against
                 // the average of its four neighbours. On a flat surface —
@@ -695,8 +692,8 @@ pub mod composite_shader {
             depth_texture: texture_2d(float)
 
             pixel: fn() {
-                let s = self.scene_texture.sample_as_bgra(self.pos)
-                let scene = vec4(s.z, s.y, s.x, s.w)
+                let s = self.scene_texture.sample(self.pos)
+                let scene = s
                 // Cavity AO + edges — the same depth Laplacian as the native
                 // variant; the review found this variant had been skipped, so
                 // wasm silently rendered without the effect.
@@ -828,7 +825,7 @@ impl DrawGridPlane {
     pub fn draw(&mut self, cx: &mut CxDraw, geometry_id: GeometryId) {
         self.draw_vars.geometry_id = Some(geometry_id);
         if self.draw_vars.can_instance() {
-            let new_area = cx.add_instance(&self.draw_vars);
+            let new_area = cx.add_instance(&mut self.draw_vars);
             self.draw_vars.area = cx.update_area_refs(self.draw_vars.area, new_area);
         }
     }
@@ -949,7 +946,7 @@ impl DrawRobotMesh {
     pub fn draw(&mut self, cx: &mut CxDraw, geometry_id: GeometryId) {
         self.draw_vars.geometry_id = Some(geometry_id);
         if self.draw_vars.can_instance() {
-            let new_area = cx.add_instance(&self.draw_vars);
+            let new_area = cx.add_instance(&mut self.draw_vars);
             self.draw_vars.area = cx.update_area_refs(self.draw_vars.area, new_area);
         }
     }
@@ -987,7 +984,7 @@ impl DrawShadowDepth {
     pub fn draw(&mut self, cx: &mut CxDraw, geometry_id: GeometryId) {
         self.draw_vars.geometry_id = Some(geometry_id);
         if self.draw_vars.can_instance() {
-            let new_area = cx.add_instance(&self.draw_vars);
+            let new_area = cx.add_instance(&mut self.draw_vars);
             self.draw_vars.area = cx.update_area_refs(self.draw_vars.area, new_area);
         }
     }
@@ -1022,7 +1019,7 @@ impl DrawRobotReflect {
     pub fn draw(&mut self, cx: &mut CxDraw, geometry_id: GeometryId) {
         self.draw_vars.geometry_id = Some(geometry_id);
         if self.draw_vars.can_instance() {
-            let new_area = cx.add_instance(&self.draw_vars);
+            let new_area = cx.add_instance(&mut self.draw_vars);
             self.draw_vars.area = cx.update_area_refs(self.draw_vars.area, new_area);
         }
     }

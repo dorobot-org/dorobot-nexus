@@ -1,0 +1,478 @@
+{
+  "source": {
+    "dorobot-studio": "3e09ff249e83ea7f3c09e7c66acf1f41d5ce7ad5",
+    "dorobot-nexus": "688e3e6a8ac7bed9e0b95f7f30240892dac80640",
+    "makepad": "44d8220f12acfa46157019267e119e0866dd6b05"
+  },
+  "capture": "Original Makepad pixels; copied unchanged. Machine paths and runtime data omitted.",
+  "files": [
+    {
+      "file": "nexus-1440x900-light-home.png",
+      "sha256": "253672f3f7d4e9f5a9090448eb0f00b9cde9ef76f05ff03715036941a5727ec7",
+      "screen": "Home",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-light-scenes.png",
+      "sha256": "62ef58545962e45594fba8069fce8b6bb65ea19c85a88dd14481aa5b4f2bdb6d",
+      "screen": "Scenes",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-light-robots.png",
+      "sha256": "b4db3d892efa938e3c523980c40cbcb71cb932e8137331e4e481adaaadb70d28",
+      "screen": "Robots",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-light-train.png",
+      "sha256": "6993731c5d3cb94be548a4ef0a9eb750e9aa0ccc093663c9f86a33e7a3a80fc5",
+      "screen": "Train",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-light-inspect.png",
+      "sha256": "6a35a6aaec094c88d9181e31a764c572fd5bc743f00e2d5043b5db66f7b3d0b3",
+      "screen": "Inspect",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-light-validate.png",
+      "sha256": "43ed9f85cf20da537f708b63a162cdf22eae3dbc3b1c675fe7c197308b904101",
+      "screen": "Validate",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-light-runs.png",
+      "sha256": "5d78f95eb310a25a3e96d31752227b20cf3018538e67492922e93628363f9505",
+      "screen": "Runs",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-light-deploy.png",
+      "sha256": "0c452943fd1ec1faa7b87d320ef81994803adaaee6aebcefab59f71205469999",
+      "screen": "Deploy",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-dark-home.png",
+      "sha256": "1792574ee445974460f6010bfea00a8220226d094345ff0f80612aea073cfef8",
+      "screen": "Home",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-dark-scenes.png",
+      "sha256": "2e6a9d5f3a0618207b18dc13d1072fa54ab077b5f8b062d6b38022bc035788e2",
+      "screen": "Scenes",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-dark-robots.png",
+      "sha256": "d6be36a03fc6bf26af9c32bf32ba9f39e36485d4612466f1ca87d8cd9794c055",
+      "screen": "Robots",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-dark-train.png",
+      "sha256": "6720c0f55cda6b77177c5cc46e1bf3d7913ebd7946840acca4818376bca76cd2",
+      "screen": "Train",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-dark-inspect.png",
+      "sha256": "cb50da9ce7be3b453fd45f82dbfe994b36dec4a5e22c06c84a22f0892f3f8e59",
+      "screen": "Inspect",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-dark-validate.png",
+      "sha256": "e4f4bd1d643af77995fbe0e970b86ae148045638f5788984838f3e8626be1d49",
+      "screen": "Validate",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-dark-runs.png",
+      "sha256": "8ba604bf799f4e4feb4672f55d0a7af5ee47d5223d8382fd5ae85a301abb5f45",
+      "screen": "Runs",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1440x900-dark-deploy.png",
+      "sha256": "1d69bb9d23e3f2bdb9bb8f444ca6ffa147c5cd2a07738622a1e4f342206cc32b",
+      "screen": "Deploy",
+      "size": [
+        1440,
+        900
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-light-home.png",
+      "sha256": "39fae99d4971719ff5be642a95a164dc3e3ca85463e8404e84fa047918afe77a",
+      "screen": "Home",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-light-scenes.png",
+      "sha256": "7dc8766cfe03dce7490b2f46e2ed471977712508d3808a2089d8e9208ad1857c",
+      "screen": "Scenes",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-light-robots.png",
+      "sha256": "69af20af09c69ed47e8bac82742ec0d908ee5e5f3c3a2509a85814f653bb7270",
+      "screen": "Robots",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-light-train.png",
+      "sha256": "ff6e99258b8b2eeddf9fb096069b7466c0abb81daecfc375dcefe4621909bc34",
+      "screen": "Train",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-light-inspect.png",
+      "sha256": "2cf440d390818fcad76bd17b0c399820f91bd9f7b20befa9555488d3250dc63a",
+      "screen": "Inspect",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-light-validate.png",
+      "sha256": "3e6ed9bddc21a3ac93507933faac7e61f7596c8f085966dc12ab19710b377a2a",
+      "screen": "Validate",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-light-runs.png",
+      "sha256": "5140f92ccc01ab68a89c15b27da39b32c56a93f1ae65119c7a0d20d3e828b53b",
+      "screen": "Runs",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-light-deploy.png",
+      "sha256": "a9baf7edbaf51eea978883a37acc372d7cef81e8352d967625179ce7fdc550fc",
+      "screen": "Deploy",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "light",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-dark-home.png",
+      "sha256": "2a7a3cbf45fd9aaf54831dc655c13b7891ad9d406659bfb75fd8ec1c088ad67c",
+      "screen": "Home",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-dark-scenes.png",
+      "sha256": "b8882d33ee9699cf6eb992a9e2ce1d585373963fc18f1e134f707e068cf182b2",
+      "screen": "Scenes",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-dark-robots.png",
+      "sha256": "1f24edce1ceb4209e566a1ed88c4cb2a6cdb888755d2fa9b7eedca099a45dcd5",
+      "screen": "Robots",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-dark-train.png",
+      "sha256": "b30621c8b9088d74155dd7cc7114abe13ed6fa743285eeb81d20a9637b1ae614",
+      "screen": "Train",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-dark-inspect.png",
+      "sha256": "ef30e7e3727a5b757049a8c51528df15d52a339ef15fdeaed9dfd53322a6a1d8",
+      "screen": "Inspect",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-dark-validate.png",
+      "sha256": "068a5dd1555b3117b99ffb6bebee687551eed127c21d4a5fdfb3de0766a0cfda",
+      "screen": "Validate",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-dark-runs.png",
+      "sha256": "89a3cb6383fc5dbd29b513afc3e71dc8eb5219d5ad35f4759b5485f3cba92f57",
+      "screen": "Runs",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nexus-1024x768-dark-deploy.png",
+      "sha256": "6dc7c19899965ab9ff1a418135066f520112a0fdb9c0ef4eeee7d419a1cd1838",
+      "screen": "Deploy",
+      "size": [
+        1024,
+        768
+      ],
+      "appearance": "dark",
+      "input": "pointer click"
+    },
+    {
+      "file": "nano-details.png",
+      "sha256": "df995bbb2de3746295fff93d6e9e8fdb72bb5044c7bcbf1024642fac3219781a",
+      "kind": "interaction journey"
+    },
+    {
+      "file": "help-dialog.png",
+      "sha256": "fafe84668f2459d31fae0cee60991123e007266c65a30c4138f6ba92c61d0882",
+      "kind": "interaction journey"
+    },
+    {
+      "file": "search-empty.png",
+      "sha256": "2e96497df3f2052de103d49e6d64b45fe8370e513d9fab5fc64006d134921d50",
+      "kind": "interaction journey"
+    },
+    {
+      "file": "nexus-task-settings.png",
+      "sha256": "557a35e299d69d69d1b6b8471e25342acc87a2fe5e2e30ff56359335eaa4dc08",
+      "kind": "interaction journey"
+    },
+    {
+      "file": "nexus-rungs-scrolled.png",
+      "sha256": "711805c3668b20f176ce1768ac941a55c48199ee2cc365201a20b2ab185bcf38",
+      "kind": "interaction journey"
+    },
+    {
+      "file": "mac-mini-m4-nano.png",
+      "sha256": "69af20af09c69ed47e8bac82742ec0d908ee5e5f3c3a2509a85814f653bb7270",
+      "kind": "Mac-mini original pixels"
+    }
+  ],
+  "journeys": [
+    {
+      "name": "Nano opened in writable workspace",
+      "pass": true
+    },
+    {
+      "name": "compact details replaces list",
+      "pass": true
+    },
+    {
+      "name": "Escape dismisses dialog without changing robot",
+      "pass": true
+    },
+    {
+      "name": "search and clear preserve selection",
+      "pass": true
+    },
+    {
+      "name": "Select All does not animate the robot",
+      "pass": true
+    },
+    {
+      "name": "cancel rename dialog",
+      "pass": true
+    },
+    {
+      "name": "appearance preserves selected robot",
+      "pass": true
+    },
+    {
+      "name": "all workspace keyboard shortcuts retain robot",
+      "pass": true
+    },
+    {
+      "name": "workspace remains saved",
+      "pass": true
+    }
+  ],
+  "restart": [
+    "theme",
+    "mode",
+    "robot",
+    "modal"
+  ],
+  "capture_source": {
+    "dorobot-studio": "3e09ff249e83ea7f3c09e7c66acf1f41d5ce7ad5",
+    "dorobot-nexus": "7f87c2e02829a36d8ffe36202508500b7a5200fc"
+  },
+  "cluster": [
+    {
+      "machine": "Mac mini M2 Pro, 32 GB",
+      "os": "macOS 26.4.1",
+      "studio": {
+        "captures": 10,
+        "checks_passed": 12
+      },
+      "nexus": {
+        "captures": 16,
+        "checks_passed": 9
+      },
+      "nano_structure": [
+        27,
+        26,
+        17,
+        134
+      ]
+    },
+    {
+      "machine": "Mac mini M4 Pro, 64 GB",
+      "os": "macOS 15.7.9",
+      "studio": {
+        "captures": 10,
+        "checks_passed": 12
+      },
+      "nexus": {
+        "captures": 16,
+        "checks_passed": 9
+      },
+      "nano_structure": [
+        27,
+        26,
+        17,
+        134
+      ]
+    }
+  ]
+}

@@ -52,6 +52,8 @@ a GUI at all.
 ## Adora Nano
 
 The portable Nano model is bundled at `data/adora_nano/adora_nano.urdf`.
+Run `./tools/run_jit.sh --nano` to import it and open the Robots workspace using
+Makepad's Relax Rust JIT.
 In **Robots → Import**, select that file. Nexus copies the model and referenced
 meshes into its local robot library. See the [model notes](data/adora_nano/README.md)
 for CAD provenance and limits. Training needs a matching task and actuator
@@ -60,9 +62,17 @@ mapping; importing the URDF does not configure a trainer.
 ## Quick start
 
 ```bash
-tools/fetch_robot_meshes.py g1     # 20 MB, once — meshes are fetched, not committed
-cargo run --release -p nexus-studio   # the lifecycle console
+./tools/run_jit.sh                # lifecycle console, compiled from source by Relax
+./tools/run_jit.sh --nano         # bundled Nano URDF and meshes
+./tools/run_jit.sh --check        # JIT type/borrow check
 ```
+
+Both Studios use OctoSense's Makepad iOS light/dark sheets and matching shared
+controls. The first launch builds the pinned runner in your user cache and
+requires Rust, Cargo, Git, Python 3 and a platform C compiler. See
+[JIT setup and validation](docs/JIT.md) for the runtime pin and tested limits.
+For G1, run `tools/fetch_robot_meshes.py g1` once to fetch its optional meshes.
+Native builds remain available with `cargo run --release -p nexus-studio`.
 
 `nexus-studio` uses the shared `dorobot-ux` crate from the separate
 `../dorobot-studio` project (relative to this checkout). Production opens the saved workspace. Select a robot

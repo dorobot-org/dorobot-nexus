@@ -10,7 +10,9 @@
 use makepad_widgets::*;
 use makepad_xr::scene::*;
 
-use crate::render::draw::{DrawGridPlane, DrawRobotMesh, DrawRobotReflect, DrawSceneComposite, DrawShadowDepth};
+use crate::render::draw::{
+    DrawGridPlane, DrawRobotMesh, DrawRobotReflect, DrawSceneComposite, DrawShadowDepth,
+};
 use crate::robot::{load_any, load_robot, ForwardKinematics, Robot};
 
 /// Mesh registry keyed by caller-chosen ids, with (geometry, local center,
@@ -131,7 +133,9 @@ fn set_pass_camera(cx: &mut Cx, pass: &DrawPass, scene: &SceneState3D, pan: Vec2
 /// Per-instance transforms (FK link matrices) copy directly — glam and the
 /// shader's instance path agree on layout.
 fn m4(m: glam::Mat4) -> Mat4f {
-    Mat4f { v: m.to_cols_array() }
+    Mat4f {
+        v: m.to_cols_array(),
+    }
 }
 
 /// The scene world transform (draw_list.view_transform) is consumed with the
@@ -140,7 +144,9 @@ fn m4(m: glam::Mat4) -> Mat4f {
 /// (model below its own orbit target = the "orbit rail" bug), while
 /// instance translations are correct. Transpose only this one.
 fn m4_world(m: glam::Mat4) -> Mat4f {
-    Mat4f { v: m.transpose().to_cols_array() }
+    Mat4f {
+        v: m.transpose().to_cols_array(),
+    }
 }
 
 /// URDF robots are Z-up; the scene camera is Y-up.
@@ -313,6 +319,9 @@ pub struct RobotView {
     movable: Vec<usize>,
     #[rust(0usize)]
     selected: usize,
+    /// Embedders with their own transport can disable manual pose shortcuts.
+    #[live(true)]
+    keyboard_controls: bool,
     #[rust(false)]
     animating: bool,
     #[rust(0.0f32)]
@@ -447,9 +456,11 @@ impl RobotView {
         self.last_action = match load_robot(urdf_path, assets_dir) {
             Ok(mut robot) => {
                 ForwardKinematics::update(&mut robot);
-                log!("RobotView: {} links, {} movable joints",
-                     self.robot_links_dbg(&robot),
-                     robot.joints.iter().filter(|j| j.is_movable()).count());
+                log!(
+                    "RobotView: {} links, {} movable joints",
+                    self.robot_links_dbg(&robot),
+                    robot.joints.iter().filter(|j| j.is_movable()).count()
+                );
                 self.adopt_robot(robot)
             }
             Err(e) => {
@@ -508,7 +519,10 @@ impl RobotView {
         self.robot = Some(robot);
         self.geometries.clear();
         self.geometries_dirty = true;
-        RobotViewAction::Loaded { links, movable_joints: joints }
+        RobotViewAction::Loaded {
+            links,
+            movable_joints: joints,
+        }
     }
 
     /// Remove the current model, leaving an empty scene.
@@ -535,8 +549,13 @@ impl RobotView {
     /// Current angles of the movable joints, in the same order as
     /// `set_joint_angles` expects them.
     pub fn joint_angles(&self) -> Vec<f32> {
-        let Some(robot) = &self.robot else { return Vec::new() };
-        self.movable.iter().map(|&i| robot.joints[i].angle).collect()
+        let Some(robot) = &self.robot else {
+            return Vec::new();
+        };
+        self.movable
+            .iter()
+            .map(|&i| robot.joints[i].angle)
+            .collect()
     }
 
     /// Re-frame the camera on the current model and reset the orbit.
@@ -585,7 +604,9 @@ impl RobotView {
     /// order, minus anything commented out. Matching by name against this list
     /// is the only way to be sure an angle lands on the joint it names.
     pub fn movable_joint_names(&self) -> Vec<String> {
-        let Some(robot) = &self.robot else { return Vec::new() };
+        let Some(robot) = &self.robot else {
+            return Vec::new();
+        };
         self.movable
             .iter()
             .filter_map(|&ji| robot.get_joint(ji).map(|j| j.name.clone()))
@@ -602,7 +623,11 @@ impl RobotView {
         let q = glam::Quat::from_xyzw(quat[0], quat[1], quat[2], quat[3]);
         // A zero quaternion would produce NaNs across the whole chain; treat
         // it as "no rotation" rather than poisoning every link transform.
-        let q = if q.length_squared() > 1e-12 { q.normalize() } else { glam::Quat::IDENTITY };
+        let q = if q.length_squared() > 1e-12 {
+            q.normalize()
+        } else {
+            glam::Quat::IDENTITY
+        };
         robot.base_pose =
             glam::Mat4::from_rotation_translation(q, glam::Vec3::new(pos[0], pos[1], pos[2]));
         ForwardKinematics::update(robot);
@@ -682,7 +707,8 @@ impl RobotView {
         let radius = 0.5 * (dx * dx + dy * dy + dz * dz).sqrt();
         let geometry = Geometry::new(cx);
         geometry.update(cx, indices.to_vec(), vertices);
-        self.external_meshes.insert(key, (geometry, center, radius.max(0.001)));
+        self.external_meshes
+            .insert(key, (geometry, center, radius.max(0.001)));
     }
 
     /// Replace the posed instance list of the external scene.
@@ -706,7 +732,9 @@ impl RobotView {
         let mut bmax = glam::Vec3::MIN;
         let mut any = false;
         for it in &self.external_items {
-            let Some((_, mc, mr)) = self.external_meshes.get(&it.mesh_key) else { continue };
+            let Some((_, mc, mr)) = self.external_meshes.get(&it.mesh_key) else {
+                continue;
+            };
             let sc = it.scale[0].max(it.scale[1]).max(it.scale[2]).max(1e-4);
             let r = mr * sc;
             if r > 6.0 {
@@ -834,8 +862,7 @@ impl RobotView {
         let eye_clearance = 0.15 * radius;
         let min_target_y = plane_y + eye_clearance + DEFAULT_PITCH.sin() * distance;
         // orbit pivots on the body centre (raised only if the eye needs it)
-        self.camera.desktop_target =
-            vec3(center.x, center.z.max(min_target_y), -center.y);
+        self.camera.desktop_target = vec3(center.x, center.z.max(min_target_y), -center.y);
         self.camera.distance = distance;
         self.pan_offset = vec2(0.0, 0.0);
         // grid scaled to the model: pick a round spacing near radius/3
@@ -844,9 +871,7 @@ impl RobotView {
         self.grid_spacing = steps
             .iter()
             .copied()
-            .min_by(|a, b| {
-                (a - want).abs().partial_cmp(&(b - want).abs()).unwrap()
-            })
+            .min_by(|a, b| (a - want).abs().partial_cmp(&(b - want).abs()).unwrap())
             .unwrap();
         // the plane runs out to the horizon: 130 m keeps its corners
         // (130 * sqrt(2) = 184) inside the camera's 200 m far plane, while its
@@ -980,7 +1005,9 @@ impl RobotView {
     }
 
     fn adjust_selected_joint(&mut self, cx: &mut Cx, delta: f32) {
-        let Some(ji) = self.selected_joint_index() else { return };
+        let Some(ji) = self.selected_joint_index() else {
+            return;
+        };
         if let Some(robot) = &mut self.robot {
             let angle = robot.joints[ji].angle + delta;
             robot.set_joint_angle(ji, angle);
@@ -1024,7 +1051,6 @@ impl RobotView {
         self.area.redraw(cx);
     }
 
-
     /// Orthographic view-projection looking down the key light, fitted to the
     /// robot's world bounds (plus the ground it stands on, so the shadow it
     /// casts is inside the box). Recomputed per frame because both the light
@@ -1046,7 +1072,9 @@ impl RobotView {
         // anything huge), which would stretch the map until nothing has
         // resolution. They receive shadows; they do not shape the box.
         for it in &self.external_items {
-            let Some((_, mc, mr)) = self.external_meshes.get(&it.mesh_key) else { continue };
+            let Some((_, mc, mr)) = self.external_meshes.get(&it.mesh_key) else {
+                continue;
+            };
             let sc = it.scale[0].max(it.scale[1]).max(it.scale[2]).max(1e-4);
             let r = mr * sc;
             if r > 6.0 {
@@ -1095,7 +1123,11 @@ impl RobotView {
         //    been lying still on.
         let l = self.light_vec();
         let dir = glam::Vec3::new(l[0], l[1], l[2]).normalize_or_zero();
-        let dir = if dir.length_squared() < 1e-6 { glam::Vec3::Y } else { dir };
+        let dir = if dir.length_squared() < 1e-6 {
+            glam::Vec3::Y
+        } else {
+            dir
+        };
 
         // Cascade 1 covers the caster AND the ground it throws onto. A box
         // sized to the caster alone is correct only for an overhead sun: at a
@@ -1119,7 +1151,10 @@ impl RobotView {
             // 0: the caster, tight.
             (caster_c, caster_r * 1.15),
             // 1: caster + footprint.
-            ((caster_c + foot) * 0.5, (caster_c - foot).length() * 0.5 + caster_r),
+            (
+                (caster_c + foot) * 0.5,
+                (caster_c - foot).length() * 0.5 + caster_r,
+            ),
         ];
 
         for (ci, (c, rad)) in fits.iter().enumerate() {
@@ -1131,7 +1166,11 @@ impl RobotView {
             const R_STEP: f32 = 0.25;
             let r = (rad / R_STEP).ceil() * R_STEP;
             let eye = *c + dir * (r * 2.0);
-            let up = if dir.y.abs() > 0.95 { glam::Vec3::Z } else { glam::Vec3::Y };
+            let up = if dir.y.abs() > 0.95 {
+                glam::Vec3::Z
+            } else {
+                glam::Vec3::Y
+            };
             let view = glam::Mat4::look_at_rh(eye, *c, up);
             let proj = glam::Mat4::orthographic_rh(-r, r, -r, r, 0.01, r * 4.0);
             let vp = proj * view;
@@ -1166,7 +1205,6 @@ impl RobotView {
         glam::Mat4::from_cols_array(&self.csm_vp[CSM_N - 1].v)
     }
 
-
     /// Render every link (and the terrain) into the shadow map from the
     /// light's point of view. Same geometry as the lit pass — only the
     /// transform and the output differ.
@@ -1187,10 +1225,13 @@ impl RobotView {
         // resolution across, full resolution down, so a round shadow would
         // rasterise into an oval. Widening the atlas instead gives every
         // cascade a full SIZE x SIZE slot.
-        self.shadow_pass.set_size(cx.cx, DVec2 {
-            x: (SHADOW_MAP_SIZE * CSM_N) as f64 / dpi,
-            y: SHADOW_MAP_SIZE as f64 / dpi,
-        });
+        self.shadow_pass.set_size(
+            cx.cx,
+            DVec2 {
+                x: (SHADOW_MAP_SIZE * CSM_N) as f64 / dpi,
+                y: SHADOW_MAP_SIZE as f64 / dpi,
+            },
+        );
         cx.make_child_pass(&self.shadow_pass);
         cx.begin_pass(&self.shadow_pass, None);
         {
@@ -1209,40 +1250,51 @@ impl RobotView {
             // rides on the projection, so all that changes per cascade is
             // light_vp.
             for ci in 0..CSM_N {
-            // The slot is a separate uniform rather than baked into light_vp:
-            // baked in, the hardware clip volume spans the WHOLE atlas, so
-            // geometry outside this cascade's own box (a big external ground
-            // plane, say) rasterised into the neighbouring cascade's slot.
-            // The shader clips against the pre-slot box itself and discards.
-            self.draw_shadow.light_vp = self.csm_vp[ci];
-            let n = CSM_N as f32;
-            self.draw_shadow.slot = vec4((2.0 * ci as f32 + 1.0 - n) / n, 1.0 / n, 0.0, 0.0);
-            if let Some(robot) = &self.robot {
-                for (i, _link) in robot.links.iter().enumerate() {
-                    let Some(Some(slot)) = self.geometries.get(i) else { continue };
-                    let Some(geometry) = self.geometry_pool.get(*slot) else { continue };
-                    let Some(transform) = robot.get_link_transform(i) else { continue };
-                    self.draw_shadow.transform = m4(world * transform);
+                // The slot is a separate uniform rather than baked into light_vp:
+                // baked in, the hardware clip volume spans the WHOLE atlas, so
+                // geometry outside this cascade's own box (a big external ground
+                // plane, say) rasterised into the neighbouring cascade's slot.
+                // The shader clips against the pre-slot box itself and discards.
+                self.draw_shadow.light_vp = self.csm_vp[ci];
+                let n = CSM_N as f32;
+                self.draw_shadow.slot = vec4((2.0 * ci as f32 + 1.0 - n) / n, 1.0 / n, 0.0, 0.0);
+                if let Some(robot) = &self.robot {
+                    for (i, _link) in robot.links.iter().enumerate() {
+                        let Some(Some(slot)) = self.geometries.get(i) else {
+                            continue;
+                        };
+                        let Some(geometry) = self.geometry_pool.get(*slot) else {
+                            continue;
+                        };
+                        let Some(transform) = robot.get_link_transform(i) else {
+                            continue;
+                        };
+                        self.draw_shadow.transform = m4(world * transform);
+                        let gid = geometry.geometry_id();
+                        self.draw_shadow.draw(cx3d, gid);
+                        shadow_draws += 1;
+                    }
+                }
+                // External items cast too — that is most of the point of feeding
+                // a whole scene through here.
+                for it in &self.external_items {
+                    let Some((geometry, _, _)) = self.external_meshes.get(&it.mesh_key) else {
+                        continue;
+                    };
+                    self.draw_shadow.transform =
+                        m4(world * glam::Mat4::from_cols_array(&it.transform));
+                    self.draw_shadow.scale = vec3(it.scale[0], it.scale[1], it.scale[2]);
                     let gid = geometry.geometry_id();
                     self.draw_shadow.draw(cx3d, gid);
                     shadow_draws += 1;
                 }
-            }
-            // External items cast too — that is most of the point of feeding
-            // a whole scene through here.
-            for it in &self.external_items {
-                let Some((geometry, _, _)) = self.external_meshes.get(&it.mesh_key) else { continue };
-                self.draw_shadow.transform = m4(world * glam::Mat4::from_cols_array(&it.transform));
-                self.draw_shadow.scale = vec3(it.scale[0], it.scale[1], it.scale[2]);
-                let gid = geometry.geometry_id();
-                self.draw_shadow.draw(cx3d, gid);
-                shadow_draws += 1;
-            }
-            self.draw_shadow.scale = vec3(1.0, 1.0, 1.0);
+                self.draw_shadow.scale = vec3(1.0, 1.0, 1.0);
             }
             if std::env::var("URDF_SHADOW_DEBUG").is_ok() && self.dbg_frames % 120 == 0 {
-                eprintln!("[shadow] {shadow_draws} draws over {CSM_N} cascades, bias={:?}",
-                    self.csm_bias);
+                eprintln!(
+                    "[shadow] {shadow_draws} draws over {CSM_N} cascades, bias={:?}",
+                    self.csm_bias
+                );
             }
             if let Some(prev) = previous_world {
                 cx3d.set_scene_world_transform_3d(prev);
@@ -1305,14 +1357,18 @@ impl RobotView {
         // upside-down silhouette on the near floor; flipped, the silhouette
         // lies flat with the head at the far end and feet anchored.
         // Shadows default ON (URDF_SHADOW=0 disables).
-        let shadows_on = std::env::var("URDF_SHADOW").map(|v| v != "0").unwrap_or(true);
+        let shadows_on = std::env::var("URDF_SHADOW")
+            .map(|v| v != "0")
+            .unwrap_or(true);
         self.draw_mesh.shadow_strength = if shadows_on { 0.75 } else { 0.0 };
         self.draw_grid.shadow_strength = self.draw_mesh.shadow_strength;
         let flip = std::env::var("URDF_SHADOW_FLIP")
             .map(|v| v != "0")
             .unwrap_or(!cfg!(target_arch = "wasm32"));
         self.draw_mesh.shadow_flip = if flip { 1.0 } else { 0.0 };
-        self.draw_mesh.draw_vars.set_texture(0, &self.shadow_texture);
+        self.draw_mesh
+            .draw_vars
+            .set_texture(0, &self.shadow_texture);
 
         let sky_amb = 0.23; // 0.46 of the horizon/zenith average
         self.draw_mesh.ambient_sky = vec4(
@@ -1333,8 +1389,11 @@ impl RobotView {
         self.draw_mesh.env_horizon = self.sky_horizon;
         self.draw_mesh.env_zenith = self.sky_zenith;
         self.draw_mesh.env_ground = self.ground_color;
-        self.draw_mesh.debug_mode =
-            if std::env::var("URDF_PBR_DEBUG").is_ok() { 1.0 } else { 0.0 };
+        self.draw_mesh.debug_mode = if std::env::var("URDF_PBR_DEBUG").is_ok() {
+            1.0
+        } else {
+            0.0
+        };
 
         // Terrain first: it is opaque world geometry the robot stands on, and
         // drawing it before the links keeps the depth order obvious. Matte:
@@ -1356,7 +1415,9 @@ impl RobotView {
         // own material; the robot material is restored afterwards.
         if !self.external_items.is_empty() {
             for it in &self.external_items {
-                let Some((geometry, _, _)) = self.external_meshes.get(&it.mesh_key) else { continue };
+                let Some((geometry, _, _)) = self.external_meshes.get(&it.mesh_key) else {
+                    continue;
+                };
                 self.draw_mesh.transform = m4(world * glam::Mat4::from_cols_array(&it.transform));
                 self.draw_mesh.color = vec4(it.color[0], it.color[1], it.color[2], it.color[3]);
                 self.draw_mesh.scale = vec3(it.scale[0], it.scale[1], it.scale[2]);
@@ -1373,9 +1434,15 @@ impl RobotView {
         let selected_link = self.selected_link_index();
         if let Some(robot) = &self.robot {
             for (i, link) in robot.links.iter().enumerate() {
-                let Some(Some(slot)) = self.geometries.get(i) else { continue };
-                let Some(geometry) = self.geometry_pool.get(*slot) else { continue };
-                let Some(transform) = robot.get_link_transform(i) else { continue };
+                let Some(Some(slot)) = self.geometries.get(i) else {
+                    continue;
+                };
+                let Some(geometry) = self.geometry_pool.get(*slot) else {
+                    continue;
+                };
+                let Some(transform) = robot.get_link_transform(i) else {
+                    continue;
+                };
                 let base = link.color.unwrap_or(DEFAULT_LINK_COLOR);
                 let color = if Some(i) == selected_link {
                     [
@@ -1392,19 +1459,26 @@ impl RobotView {
                 self.draw_mesh.scale = vec3(1.0, 1.0, 1.0);
                 self.draw_mesh.depth_clip = 0.0;
                 let geometry_id = geometry.geometry_id();
-                if self.draw_mesh.draw_vars.can_instance() { dbg_can += 1; }
+                if self.draw_mesh.draw_vars.can_instance() {
+                    dbg_can += 1;
+                }
                 self.draw_mesh.draw(cx, geometry_id);
                 dbg_drawn += 1;
             }
         }
         if self.dbg_frames < 3 {
             self.dbg_frames += 1;
-            log!("RVDBG dist={} target=({},{},{}) yaw={} pitch={} pan=({},{})",
-                 self.camera.distance,
-                 self.camera.desktop_target.x, self.camera.desktop_target.y,
-                 self.camera.desktop_target.z,
-                 self.camera.orbit_yaw, self.camera.orbit_pitch,
-                 self.pan_offset.x, self.pan_offset.y);
+            log!(
+                "RVDBG dist={} target=({},{},{}) yaw={} pitch={} pan=({},{})",
+                self.camera.distance,
+                self.camera.desktop_target.x,
+                self.camera.desktop_target.y,
+                self.camera.desktop_target.z,
+                self.camera.orbit_yaw,
+                self.camera.orbit_pitch,
+                self.pan_offset.x,
+                self.pan_offset.y
+            );
         }
 
         let grid_geom = self.ensure_grid_geometry(cx.cx);
@@ -1423,9 +1497,14 @@ impl RobotView {
         self.draw_grid.csm_vp0 = self.csm_vp[0];
         self.draw_grid.csm_vp1 = self.csm_vp[1];
         self.draw_grid.shadow_flip = self.draw_mesh.shadow_flip;
-        self.draw_grid.draw_vars.set_texture(0, &self.shadow_texture);
-        self.draw_grid.debug_shadow =
-            if std::env::var("URDF_SHADOW_DEBUG").is_ok() { 1.0 } else { 0.0 };
+        self.draw_grid
+            .draw_vars
+            .set_texture(0, &self.shadow_texture);
+        self.draw_grid.debug_shadow = if std::env::var("URDF_SHADOW_DEBUG").is_ok() {
+            1.0
+        } else {
+            0.0
+        };
         self.draw_grid.depth_clip = 0.0;
         // An external scene brings its own ground; the viewer's grid floor
         // would z-fight it at y = 0.
@@ -1445,9 +1524,15 @@ impl RobotView {
                 self.draw_reflect.scale = vec3(1.0, 1.0, 1.0);
                 if let Some(robot) = &self.robot {
                     for (i, link) in robot.links.iter().enumerate() {
-                        let Some(Some(slot)) = self.geometries.get(i) else { continue };
-                        let Some(geometry) = self.geometry_pool.get(*slot) else { continue };
-                        let Some(transform) = robot.get_link_transform(i) else { continue };
+                        let Some(Some(slot)) = self.geometries.get(i) else {
+                            continue;
+                        };
+                        let Some(geometry) = self.geometry_pool.get(*slot) else {
+                            continue;
+                        };
+                        let Some(transform) = robot.get_link_transform(i) else {
+                            continue;
+                        };
                         let base = link.color.unwrap_or(DEFAULT_LINK_COLOR);
                         self.draw_reflect.color = vec4(base[0], base[1], base[2], 1.0);
                         self.draw_reflect.transform = m4(mirror * world * transform);
@@ -1502,7 +1587,11 @@ impl RobotViewRef {
     /// `Some((links, movable_joints))` on the frame a model finished loading.
     pub fn loaded(&self, actions: &Actions) -> Option<(usize, usize)> {
         if let Some(item) = actions.find_widget_action(self.widget_uid()) {
-            if let RobotViewAction::Loaded { links, movable_joints } = item.cast() {
+            if let RobotViewAction::Loaded {
+                links,
+                movable_joints,
+            } = item.cast()
+            {
                 return Some((links, movable_joints));
             }
         }
@@ -1684,8 +1773,8 @@ impl Widget for RobotView {
                         return; // rect not repopulated yet — no scale reference
                     }
                     let fov = (self.camera.fov_y as f32).to_radians() * 0.5;
-                    let per_px = 2.0 * self.camera.distance * fov.tan()
-                        / (self.view_rect.size.y as f32);
+                    let per_px =
+                        2.0 * self.camera.distance * fov.tan() / (self.view_rect.size.y as f32);
                     self.pan_offset.x += delta.x as f32 * per_px;
                     self.pan_offset.y -= delta.y as f32 * per_px;
                     self.area.redraw(cx);
@@ -1697,8 +1786,7 @@ impl Widget for RobotView {
                 self.light_last_abs = None;
             }
             Event::Scroll(fs)
-                if self.view_rect.contains(fs.abs)
-                    && fs.scroll.x.abs() > fs.scroll.y.abs() =>
+                if self.view_rect.contains(fs.abs) && fs.scroll.x.abs() > fs.scroll.y.abs() =>
             {
                 // trackpad horizontal two-finger drag orbits instead of zooming
                 self.camera.orbit_yaw -= fs.scroll.x as f32 * 0.005;
@@ -1718,10 +1806,18 @@ impl Widget for RobotView {
         }
 
         if let Event::KeyDown(ke) = event {
+            if !self.keyboard_controls
+                || ke.modifiers.logo
+                || ke.modifiers.control
+                || ke.modifiers.alt
+            {
+                return;
+            }
             match ke.key_code {
                 KeyCode::ArrowLeft => {
                     if !self.movable.is_empty() {
-                        self.selected = (self.selected + self.movable.len() - 1) % self.movable.len();
+                        self.selected =
+                            (self.selected + self.movable.len() - 1) % self.movable.len();
                         self.area.redraw(cx);
                     }
                 }

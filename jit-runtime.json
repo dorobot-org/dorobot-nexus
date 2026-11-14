@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/OctoSense-org/makepad.git",
+  "revision": "44d8220f12acfa46157019267e119e0866dd6b05",
+  "reference_repository": "https://github.com/OctoSense-org/OctoSense",
+  "reference_revision": "14f258d409b3a2b394852a8fa23e185717fdc99e",
+  "style": "ios",
+  "package": "nexus-studio",
+  "binary": "nexus-studio",
+  "optional_video": false
+}

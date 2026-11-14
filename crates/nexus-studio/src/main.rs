@@ -1,5 +1,5 @@
 //! nexus-studio — makepad port of the frozen dorobot-nexus web mockup.
-//! Eight workspaces, factory-industrial theme, EN/中文, light/dark.
+//! Eight workspaces, iOS semantic theme, EN/中文, light/dark.
 
 pub mod actions;
 pub mod artifacts;
@@ -7,6 +7,7 @@ pub mod deployment;
 pub mod drive;
 pub mod evaluation;
 pub mod external_motion;
+mod file_dialogs;
 pub mod i18n;
 pub mod jobs;
 pub mod nexus;
@@ -21,6 +22,7 @@ pub mod simulation;
 pub mod state;
 pub mod task_config;
 pub mod task_editor;
+mod ux_probe;
 pub mod workspace;
 /// Tokens and the widget kit moved to the shared `dorobot-ux` crate, which
 /// dorobot-studio draws with too. Re-exported under their old paths so the
@@ -35,6 +37,7 @@ use crate::review::State as ReviewState;
 use crate::screens::{LSpec, RSpec};
 use crate::state::*;
 use crate::tokens::pal;
+use makepad_urdf_player::robot_view::RobotViewWidgetRefExt;
 use makepad_widgets::*;
 
 /// makepad's `app_main!` generates the crate's `fn main`, and by the time that
@@ -49,6 +52,12 @@ use makepad_widgets::*;
 mod shell {
     use super::*;
     app_main!(App);
+
+    pub fn run() {
+        // The generated entry owns the HAL's main-thread window loop.
+        // Calling app_main directly only works for offscreen windows.
+        main();
+    }
 }
 
 fn main() {
@@ -61,7 +70,7 @@ fn main() {
     }
     // Never returns if a headless flag was given.
     nexus_engine::cli::maybe_headless();
-    shell::app_main();
+    shell::run();
 }
 
 script_mod! {
@@ -80,7 +89,7 @@ script_mod! {
         acts := View{
             width: Fill height: Fit
             visible: false
-            flow: Right
+            flow: Flow.Right{wrap: true}
             spacing: 4.0
             padding: Inset{left: 9. right: 7. top: 2. bottom: 4.}
             a0 := mod.widgets.nx.Mini{ visible: false }
@@ -96,16 +105,17 @@ script_mod! {
     }
 
     let ModeTab = Button{
-        width: Fit height: Fit
-        padding: Inset{left: 12. right: 12. top: 8. bottom: 8.}
+        width: Fill height: 48
+        align: Align{x: 0.0 y: 0.5}
+        padding: 12.0
         text: "Mode"
         draw_text +: {
             light: instance(0.0)
             on: instance(0.0)
-            text_style: mod.widgets.nx.T_BODY{}
+            text_style: mod.widgets.nx.T_BODY{font_size: 12.0}
             get_color: fn() {
-                let idle = mix(#x948781, #x5E564E, self.light)
-                let ink = mix(#xF2F0EC, #x161413, self.light)
+                let idle = mix(#xAEAEB2, #x636366, self.light)
+                let ink = mix(#x64B5FF, #x0060CC, self.light)
                 return mix(idle, ink, max(self.on, self.hover))
             }
         }
@@ -114,9 +124,10 @@ script_mod! {
             on: instance(0.0)
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                let vio = mix(#xEF6F2E, #xD15010, self.light)
-                sdf.rect(0.0, self.rect_size.y - 2.0, self.rect_size.x, 2.0)
-                sdf.fill(mix(vec4(0.0,0.0,0.0,0.0), vio, self.on))
+                let vio = mix(#x0A84FF, #x007AFF, self.light)
+                sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, 10.0)
+                let well = mix(#x19334D, #xE5F0FF, self.light)
+                sdf.fill(mix(vec4(0.0,0.0,0.0,0.0), well, max(self.on, self.hover * 0.5)))
                 return sdf.result
             }
         }
@@ -125,9 +136,9 @@ script_mod! {
     startup() do #(App::script_component(vm)){
         ui: Root{
             main_window := Window{
-                window.title: "dorobot-nexus"
+                window.title: "Nexus Studio"
                 window.inner_size: vec2(1500, 980)
-                pass.clear_color: #x0A0908
+                pass.clear_color: #x000000
 
                 body +: {
                     width: Fill
@@ -135,25 +146,23 @@ script_mod! {
                     flow: Overlay
 
                     root_bg := mod.widgets.nx.Ground{
-                        flow: Down
+                        flow: Right
 
                         // ------------------------------------------ chrome --
                         modes := View{
-                            width: Fill height: Fit
-                            flow: Flow.Right{wrap: true}
-                            align: Align{y: 0.5}
-                            spacing: 2.0
-                            padding: Inset{left: 10. right: 12. top: 2. bottom: 0.}
+                            width: 196 height: Fill flow: Down spacing: 4.0 padding: 12.0
                             show_bg: true
                             draw_bg +: {
                                 light: instance(0.0)
                                 pixel: fn() {
-                                    let base = mix(#x141312, #xFBFAF8, self.light)
-                                    let edge = mix(#x2A2725, #xD8D4CF, self.light)
+                                    let base = mix(#x1C1C1E, #xFFFFFF, self.light)
+                                    let edge = mix(#x38383A, #xD1D1D6, self.light)
                                     let t = step(self.rect_size.y - 1.0, self.pos.y * self.rect_size.y)
                                     return mix(base, edge, t)
                                 }
                             }
+                            Label{width: Fill height: 64 text: "Nexus Studio"
+                                draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_TITLE{}} }
                             tab0 := ModeTab{}
                             tab1 := ModeTab{}
                             tab2 := ModeTab{}
@@ -162,13 +171,20 @@ script_mod! {
                             tab5 := ModeTab{}
                             tab6 := ModeTab{}
                             tab7 := ModeTab{}
-                            c_state := mod.widgets.nx.ChipV{}
-                            c_steps := mod.widgets.nx.ChipV{}
-                            c_dep := mod.widgets.nx.ChipV{ visible: false }
-                            lang_btn := mod.widgets.nx.Mini{ text: "中文" }
-                            theme_btn := mod.widgets.nx.Mini{ text: "◐" }
-                            help_btn := mod.widgets.nx.Mini{ text: "?" }
+                            Filler{}
+                            lang_btn := mod.widgets.nx.NxBtn{width: Fill height: 44 text: "中文"}
+                            theme_btn := mod.widgets.nx.NxBtn{width: Fill height: 44 text: "Appearance: Auto"}
+                            help_btn := mod.widgets.nx.NxBtn{width: Fill height: 44 text: "Help"}
                         }
+                        workspace := View{width: Fill height: Fill flow: Down
+                            page_header := View{width: Fill height: Fit flow: Right padding: 18.0 spacing: 12.0 align: Align{y: 0.5}
+                                page_title := Label{width: Fill text: "Home"
+                                    draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_TITLE{font_size: 22.0}} }
+                                c_state := mod.widgets.nx.ChipV{}
+                                c_steps := mod.widgets.nx.ChipV{}
+                                c_dep := mod.widgets.nx.ChipV{visible: false}
+                                inspector_btn := mod.widgets.nx.NxBtn{height: 44 text: "Details"}
+                            }
 
                         // ------------------------------------------ canvas --
                         canvas := View{
@@ -215,6 +231,13 @@ script_mod! {
                                 width: Fill height: Fill
                                 flow: Down
                                 spacing: 8.0
+                                empty_stage := mod.widgets.nx.Panel{visible: false width: Fill height: Fill flow: Down padding: 28.0 spacing: 18.0
+                                    empty_title := Label{width: Fill text: "No training yet"
+                                        draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_TITLE{font_size: 20.0}} }
+                                    empty_description := Label{width: Fill height: Fit text: ""
+                                        draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_BODY{font_size: 12.0}} }
+                                    empty_action := mod.widgets.nx.Primary{height: 44 text: "Choose a scene set"}
+                                }
                                 stage := mod.widgets.screens.Stage{}
                                 tl := mod.widgets.screens.TimelinePanel{}
                             }
@@ -228,6 +251,7 @@ script_mod! {
 
                         home := mod.widgets.screens.HomePage{ visible: false }
                         composer := mod.widgets.screens.ComposerStrip{ visible: false }
+                        }
                     }
 
                     // -------------------------------------------- overlays --
@@ -254,6 +278,8 @@ pub struct App {
     #[rust]
     workspace_error: Option<String>,
     #[rust]
+    pending_dialog: Option<file_dialogs::Pending>,
+    #[rust]
     workspace_session: Option<crate::workspace::Session>,
     #[rust]
     artifact_plan: Option<crate::artifacts::Plan>,
@@ -267,6 +293,8 @@ pub struct App {
     pub system_light: f32,
     #[rust]
     pub window_width: f64,
+    #[rust]
+    pub inspector_open: bool,
     #[rust]
     export_job: Option<crate::policy_export::Job>,
     #[live]
@@ -354,6 +382,7 @@ pub struct App {
 
 impl AppMain for App {
     fn script_mod(vm: &mut ScriptVm) -> ScriptValue {
+        dorobot_ux::install_ios(vm, crate::preferences::system_light() > 0.5);
         makepad_widgets::script_mod(vm);
         makepad_urdf_player::makepad_xr::script_mod(vm);
         // Nexus supplies its own joint controls. Register only the viewer;
@@ -418,6 +447,9 @@ impl AppMain for App {
         }
         self.match_event(cx, event);
         self.ui.handle_event(cx, event, &mut Scope::empty());
+        if matches!(event, Event::LiveEdit | Event::ScriptReapply) {
+            self.sync_all(cx);
+        }
     }
 }
 
@@ -475,6 +507,11 @@ impl MatchEvent for App {
         if self.st.demo {
             self.st.modal = AppModal::Tour;
         }
+        // A portable model can be opened directly by the standalone JIT launcher.
+        if let Some(path) = std::env::args().skip_while(|s| s != "--robot").nth(1) {
+            self.import_robot_path(&path);
+            self.st.mode = Mode::Robots;
+        }
         self.sync_all(cx);
         // Launched as an observer: attach to the named run immediately and
         // land on Train, so the window opens onto the live curves instead of
@@ -487,6 +524,7 @@ impl MatchEvent for App {
     }
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        self.route_file_dialogs(cx, actions);
         self.route_chrome(cx, actions);
         self.route_rails(cx, actions);
         self.route_modal(cx, actions);
@@ -496,6 +534,30 @@ impl MatchEvent for App {
     }
 
     fn handle_key_down(&mut self, cx: &mut Cx, e: &KeyEvent) {
+        if self.st.modal == AppModal::None && (e.modifiers.logo || e.modifiers.control) {
+            let index = match e.key_code {
+                KeyCode::Key1 => Some(0),
+                KeyCode::Key2 => Some(1),
+                KeyCode::Key3 => Some(2),
+                KeyCode::Key4 => Some(3),
+                KeyCode::Key5 => Some(4),
+                KeyCode::Key6 => Some(5),
+                KeyCode::Key7 => Some(6),
+                KeyCode::Key8 => Some(7),
+                _ => None,
+            };
+            if let Some(index) = index {
+                self.st.mode = MODES[index];
+                self.sync_all(cx);
+                return;
+            }
+        }
+
+        if cx.has_key_focus(self.ui.widget(cx, ids!(filter_in)).area())
+            && !(e.modifiers.logo || e.modifiers.control)
+        {
+            return;
+        }
         if self.simulation.is_some() && self.st.modal == AppModal::None {
             let action = match e.key_code {
                 KeyCode::ArrowRight => Some("sim-step"),
@@ -610,6 +672,14 @@ impl App {
                 return;
             }
         }
+        if self.ui.button(cx, ids!(empty_action)).clicked(actions) {
+            self.st.mode = Mode::Scenes;
+            self.sync_all(cx);
+        }
+        if self.ui.button(cx, ids!(inspector_btn)).clicked(actions) {
+            self.inspector_open = !self.inspector_open;
+            self.sync_all(cx);
+        }
         if self.ui.button(cx, ids!(lang_btn)).clicked(actions) {
             self.st.lang = 1 - self.st.lang;
             self.sync_all(cx);
@@ -670,6 +740,7 @@ impl App {
         self.st.sync_run_metrics();
         self.save_workspace();
         let l = self.light();
+        dorobot_ux::sync_appearance(cx, l > 0.5);
         self.sync_chrome(cx, l);
         crate::screens::sync_mode_frame(self, cx);
         crate::screens::sync_left_rail(self, cx);
@@ -687,6 +758,47 @@ impl App {
     }
 
     fn sync_fast(&mut self, cx: &mut Cx) {
+        if std::env::var_os("DOROBOT_UX_REPORT").is_some() {
+            ux_probe::write(
+                cx,
+                &self.ui,
+                serde_json::json!({
+                    "mode": self.st.mode.label(), "theme": format!("{:?}", self.st.theme), "light": self.light(),
+                    "robot_name": self.st.sel.robot.as_ref().and_then(|id| self.st.robots.iter().find(|r| &r.id == id)).map(|r| &r.name),
+                    "robot_structure": self.st.sel.robot.as_ref().and_then(|id| self.st.robots.iter().find(|r| &r.id == id)).map(|r| [r.links, r.joints, r.movable, r.meshes]),
+                    "robot": self.st.sel.robot, "robots": self.st.robots.len(), "modal": format!("{:?}", self.st.modal),
+                    "workspace_writable": self.workspace_session.is_some(), "robot_animating": self.ui.robot_view(cx, ids!(rview)).is_animating(), "workspace_error": self.workspace_error,
+                    "inspector_open": self.inspector_open, "filter": self.st.filter, "picker_pending": self.pending_dialog.is_some()
+                }),
+                &[
+                    "tab0",
+                    "tab1",
+                    "tab2",
+                    "tab3",
+                    "tab4",
+                    "tab5",
+                    "tab6",
+                    "tab7",
+                    "theme_btn",
+                    "help_btn",
+                    "lang_btn",
+                    "inspector_btn",
+                    "rail_l",
+                    "rail_r",
+                    "filter_in",
+                    "cap_btn",
+                    "stage",
+                    "modal_host",
+                    "b_rename",
+                    "rail_r.rr.r0.btns.b0",
+                    "rail_r.rr.r5.cap.btn",
+                    "rail_r.rr.r7.btns.b0",
+                    "modal_host.panel.opts.opt0",
+                    "modal_host.panel.foot.b_cancel",
+                ],
+            );
+        }
+
         let width = self.ui.view(cx, ids!(root_bg)).area().rect(cx).size.x;
         if width > 0. && (self.window_width - width).abs() > 1. {
             self.window_width = width;
@@ -789,6 +901,21 @@ impl App {
     }
 
     fn sync_chrome(&mut self, cx: &mut Cx, l: f32) {
+        self.ui
+            .label(cx, ids!(page_title))
+            .set_text(cx, &self.t(self.st.mode.label()));
+        self.ui.button(cx, ids!(inspector_btn)).set_text(
+            cx,
+            if self.inspector_open {
+                "Hide details"
+            } else {
+                "Details"
+            },
+        );
+        self.ui
+            .widget(cx, ids!(inspector_btn))
+            .set_visible(cx, self.st.mode != Mode::Home);
+
         let modes_bg = self.ui.view(cx, ids!(modes));
         if !modes_bg.is_empty() {
             let mut m = modes_bg.clone();
@@ -823,6 +950,8 @@ impl App {
                 draw_text +: { on: #(on) light: #(l as f64) }
             });
         }
+        let mut inspector = self.ui.button(cx, ids!(inspector_btn));
+        script_apply_eval!(cx, inspector, {draw_bg +: {light: #(l as f64)} draw_text +: {light: #(l as f64)}});
         // chips
         let running = self.st.runs.iter().find(|r| r.state == RunState::Running);
         let shown = running
@@ -884,9 +1013,9 @@ impl App {
             tb.set_text(
                 cx,
                 match self.st.theme {
-                    Theme::Auto => "◐",
-                    Theme::Light => "☀",
-                    Theme::Dark => "☾",
+                    Theme::Auto => "Appearance: Auto",
+                    Theme::Light => "Appearance: Light",
+                    Theme::Dark => "Appearance: Dark",
                 },
             );
             script_apply_eval!(cx, tb, { draw_bg +: { light: #(l as f64) } draw_text +: { light: #(l as f64) } });
@@ -1069,31 +1198,21 @@ impl App {
                     "ck-export" => {
                         let source = std::path::Path::new(&b);
                         if source.is_file() {
-                            if let Some(dest) = rfd::FileDialog::new()
-                                .set_title("Export checkpoint")
-                                .set_file_name(source.file_name().unwrap().to_string_lossy())
-                                .save_file()
-                            {
-                                match std::fs::copy(source, &dest) {
-                                    Ok(_) => {
-                                        if source.with_extension("txt").is_file() {
-                                            if let Err(e) = std::fs::copy(
-                                                source.with_extension("txt"),
-                                                dest.with_extension("txt"),
-                                            ) {
-                                                self.st
-                                                    .toast(format!("Weights copied, but manifest export failed: {e}"));
-                                                self.sync_all(cx);
-                                                return;
-                                            }
-                                        }
-                                        self.st.toast(format!(
-                                            "Checkpoint exported to {}",
-                                            dest.display()
-                                        ));
-                                    }
-                                    Err(e) => self.st.toast(format!("Export failed: {e}")),
-                                }
+                            if self.pending_dialog.is_none() {
+                                self.pending_dialog =
+                                    Some(file_dialogs::Pending::Checkpoint(source.to_path_buf()));
+                                cx.open_save_file_dialog(
+                                    FileDialog::new()
+                                        .set_id(live_id!(checkpoint_export))
+                                        .set_title("Export checkpoint".into())
+                                        .set_filename(
+                                            source
+                                                .file_name()
+                                                .unwrap()
+                                                .to_string_lossy()
+                                                .into_owned(),
+                                        ),
+                                );
                             }
                         } else {
                             self.st.toast("Checkpoint file is unavailable.".into());
@@ -2404,21 +2523,15 @@ impl App {
                 );
             }
             "backend-profile" => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_title("Choose robot RL training profile")
-                    .add_filter("Training profile", &["json"])
-                    .pick_file()
-                {
-                    if let Some(r) = st
-                        .sel
-                        .robot
-                        .as_ref()
-                        .and_then(|id| st.robots.iter_mut().find(|r| &r.id == id))
-                    {
-                        r.use_task = false;
-                    }
-                    std::env::set_var("NEXUS_TRAINING_PROFILE", &path);
-                    st.toast(format!("Training backend: {}", path.display()));
+                if self.pending_dialog.is_none() {
+                    self.pending_dialog =
+                        Some(file_dialogs::Pending::Profile(st.sel.robot.clone()));
+                    cx.open_select_file_dialog(
+                        FileDialog::new()
+                            .set_id(live_id!(training_profile))
+                            .set_title("Choose robot RL training profile".into())
+                            .add_filter("Training profile".into(), vec!["json".into()]),
+                    );
                 }
             }
             "robot-rename" => st.modal = AppModal::RenameRobot,

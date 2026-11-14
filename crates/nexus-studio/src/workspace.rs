@@ -388,7 +388,11 @@ pub(crate) fn restore_at(st: &mut Store, p: &Path, environment: bool) -> io::Res
         st.sel.scene = Some(draft.id.clone());
         st.draft = Some(draft);
         st.dirty = true;
-        st.mode = Mode::Scenes;
+        // Recover the draft without taking the user away from their last
+        // workspace. Older documents did not record a workspace choice.
+        if doc.mode.is_none() {
+            st.mode = Mode::Scenes;
+        }
         st.toast("Recovered unsaved scene draft. Save or revert to resolve it.".into());
     }
     Ok(())
@@ -410,12 +414,13 @@ mod tests {
         p
     }
     #[test]
-    fn draft_selection_and_robot_identity_recover_after_reopen() {
+    fn draft_selection_and_last_workspace_recover_after_reopen() {
         let root = temp();
         let mut st = Store::seed();
         st.demo = false;
         st.sel.scene = Some(st.scenes[1].id.clone());
         st.edit_field("friction", 0.371);
+        st.mode = Mode::Robots;
         st.theme = Theme::Light;
         st.lang = 1;
         st.robots[0].model_name = Some(st.robots[0].name.clone());
@@ -432,7 +437,7 @@ mod tests {
         assert_eq!(reopened.lang, 1);
         assert_eq!(reopened.robots[0].name, "Lab robot");
         assert_eq!(reopened.robots[0].model_name(), "Unitree G1-29dof");
-        assert_eq!(reopened.mode, Mode::Scenes);
+        assert_eq!(reopened.mode, Mode::Robots);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

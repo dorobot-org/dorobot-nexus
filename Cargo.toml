@@ -20,7 +20,7 @@ nexus-engine = { path = "crates/nexus-engine" }
 # has it.
 dorobot-ux = { path = "../dorobot-studio/crates/dorobot-ux" }
 
-makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev" }
+makepad-widgets = { git = "https://github.com/OctoSense-org/makepad.git", rev = "44d8220f12acfa46157019267e119e0866dd6b05", default-features = false, features = ["dock", "glass", "nav_menus"] }
 makepad-app-shell = { git = "https://github.com/mofa-org/makepad-flex-layout", rev = "78425b1" }
 # Pinned to the renderer upgrade (registered shadows, menagerie palette,
 # checker ground, mirror floor, headlight, smooth normals, base-pose and
@@ -32,10 +32,15 @@ rfd = "0.15"
 [profile.release]
 opt-level = 3
 
-# Keep the renderer's Metal bindings consistent with its generated shader ABI.
-# See vendor/makepad-platform/NEXUS_PATCH.md for provenance and the small fix.
-[patch."https://github.com/makepad/makepad"]
-makepad-platform = { path = "vendor/makepad-platform" }
 
 [patch."https://github.com/dorobot-org/makepad-urdf-viewer"]
 makepad-urdf-player = { path = "vendor/makepad-urdf-player" }
+
+# Keep the layout and URDF renderer on the same JIT-capable Makepad revision.
+[patch."https://github.com/makepad/makepad"]
+makepad-widgets = { git = "https://github.com/OctoSense-org/makepad.git", rev = "44d8220f12acfa46157019267e119e0866dd6b05" }
+makepad-xr = { git = "https://github.com/OctoSense-org/makepad.git", rev = "44d8220f12acfa46157019267e119e0866dd6b05" }
+
+# Match the framework macro source when file dialogs also depend on bitflags.
+[patch.crates-io]
+bitflags = { git = "https://github.com/OctoSense-org/makepad.git", rev = "44d8220f12acfa46157019267e119e0866dd6b05" }

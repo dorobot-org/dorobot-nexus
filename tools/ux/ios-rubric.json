@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "target": 91,
+  "scale": 100,
+  "scope": "DoRobot Studio and Nexus Studio desktop JIT apps using iOS/iPad interaction and visual conventions. Each app must score at least 91 separately. Physical iPhone deployment, robot hardware and production training performance are outside this UI review.",
+  "reference": "OctoSense fixed-rubric, real-input, original-pixel review process; Apple iOS/iPad conventions for hierarchy, navigation, touch-sized controls and continuity.",
+  "sizes": [
+    [
+      1440,
+      900
+    ],
+    [
+      1024,
+      768
+    ]
+  ],
+  "appearances": [
+    "light",
+    "dark"
+  ],
+  "hard_gates": [
+    "Every listed screen has original rendered evidence at both target sizes and appearances.",
+    "No essential action or editor is clipped or unreachable; scrolling and overflow actions work.",
+    "Core real-input journeys pass; unsupported hardware actions explain what is needed.",
+    "No UI shader errors or panics in the tested app paths.",
+    "Appearance and navigation preserve the active task; restart restores supported user state.",
+    "No private credentials, machine addresses, personal paths or user data in published evidence."
+  ],
+  "dimensions": [
+    {
+      "id": "structure",
+      "weight": 20,
+      "criteria": [
+        "Recognizable iOS/iPad navigation and grouped content.",
+        "Clear current location and one obvious route back to the main task.",
+        "Primary work receives the available space."
+      ]
+    },
+    {
+      "id": "controls",
+      "weight": 15,
+      "criteria": [
+        "Primary actions and navigation have at least 44-point hit targets.",
+        "Visible selected, disabled and pressed states.",
+        "Keyboard focus, Escape/cancel and primary shortcuts work."
+      ]
+    },
+    {
+      "id": "typography",
+      "weight": 15,
+      "criteria": [
+        "Readable body type and distinct title/section hierarchy.",
+        "Secondary metadata remains readable.",
+        "Names and labels truncate or wrap deliberately."
+      ]
+    },
+    {
+      "id": "color",
+      "weight": 10,
+      "criteria": [
+        "Semantic iOS surfaces and restrained blue primary actions.",
+        "Light/dark works across content, controls and dialogs.",
+        "Normal text meets 4.5:1 contrast; large text 3:1."
+      ]
+    },
+    {
+      "id": "clarity",
+      "weight": 15,
+      "criteria": [
+        "Empty and error states explain a useful next step.",
+        "Controls describe user tasks without developer terminology.",
+        "Recording, playback, training and saved states are explicit."
+      ]
+    },
+    {
+      "id": "fit",
+      "weight": 10,
+      "criteria": [
+        "No essential overlap at either tested size.",
+        "Narrow layouts adapt their panes.",
+        "Scroll boundaries keep controls reachable."
+      ]
+    },
+    {
+      "id": "continuity",
+      "weight": 10,
+      "criteria": [
+        "Selection and active data survive navigation and appearance changes.",
+        "Supported saved state is restored after relaunch.",
+        "Hidden UI work is reduced while legitimate jobs remain independent."
+      ]
+    },
+    {
+      "id": "consistency",
+      "weight": 5,
+      "criteria": [
+        "Both Studios use shared type, navigation and component conventions.",
+        "The same action has the same placement and behavior across screens."
+      ]
+    }
+  ],
+  "anchors": {
+    "0": "Blocked or unusable",
+    "0.6": "Works with substantial friction",
+    "0.8": "Usable with visible deviations or an unobserved required state",
+    "0.9": "Consistently iOS-like in observed states with minor defects",
+    "1.0": "Matches the stated reference across all required observations"
+  },
+  "scoring": "Score each dimension from 0 to 1 against cited evidence. Weighted sum is the app score. Missing required evidence caps the affected dimension at 0.8 and prevents completion. Report remaining defects and evaluator provenance; do not call model review independent human review.",
+  "screens": {
+    "studio": [
+      "Library",
+      "Record",
+      "Play",
+      "Hardware",
+      "Eval"
+    ],
+    "nexus": [
+      "Home",
+      "Scenes",
+      "Robots",
+      "Train",
+      "Inspect",
+      "Validate",
+      "Runs",
+      "Deploy"
+    ]
+  },
+  "journeys": {
+    "studio": [
+      "Open Nano dataset and select another episode",
+      "Play/pause, seek, step and return to start",
+      "Navigate away and back without losing the episode or position",
+      "Switch appearance without losing playback state or layout",
+      "Tag an episode, reopen and verify the tag",
+      "Open/cancel an input flow without losing the active task",
+      "Visit hardware/capture/evaluation unavailable states and follow their next action",
+      "Relaunch and verify supported preferences and selection"
+    ],
+    "nexus": [
+      "Open bundled Nano and inspect its joints/assets",
+      "Navigate all eight workspaces with selection retained",
+      "Switch appearance with the current robot/task retained",
+      "Open and cancel robot/task settings",
+      "Inspect an empty run and unavailable training/deployment states",
+      "Filter a library and clear the filter",
+      "Relaunch and restore workspace, selection and appearance"
+    ]
+  }
+}
