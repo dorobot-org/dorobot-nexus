@@ -21,6 +21,7 @@ pub mod simulation;
 pub mod state;
 pub mod task_config;
 pub mod task_editor;
+mod ux_probe;
 pub mod workspace;
 /// Tokens and the widget kit moved to the shared `dorobot-ux` crate, which
 /// dorobot-studio draws with too. Re-exported under their old paths so the
@@ -35,6 +36,7 @@ use crate::review::State as ReviewState;
 use crate::screens::{LSpec, RSpec};
 use crate::state::*;
 use crate::tokens::pal;
+use makepad_urdf_player::robot_view::RobotViewWidgetRefExt;
 use makepad_widgets::*;
 
 /// makepad's `app_main!` generates the crate's `fn main`, and by the time that
@@ -86,7 +88,7 @@ script_mod! {
         acts := View{
             width: Fill height: Fit
             visible: false
-            flow: Right
+            flow: Flow.Right{wrap: true}
             spacing: 4.0
             padding: Inset{left: 9. right: 7. top: 2. bottom: 4.}
             a0 := mod.widgets.nx.Mini{ visible: false }
@@ -102,16 +104,17 @@ script_mod! {
     }
 
     let ModeTab = Button{
-        width: Fit height: Fit
-        padding: Inset{left: 12. right: 12. top: 8. bottom: 8.}
+        width: Fill height: 48
+        align: Align{x: 0.0 y: 0.5}
+        padding: 12.0
         text: "Mode"
         draw_text +: {
             light: instance(0.0)
             on: instance(0.0)
-            text_style: mod.widgets.nx.T_BODY{}
+            text_style: mod.widgets.nx.T_BODY{font_size: 12.0}
             get_color: fn() {
                 let idle = mix(#xAEAEB2, #x636366, self.light)
-                let ink = mix(#xF5F5F7, #x1C1C1E, self.light)
+                let ink = mix(#x64B5FF, #x0060CC, self.light)
                 return mix(idle, ink, max(self.on, self.hover))
             }
         }
@@ -121,8 +124,9 @@ script_mod! {
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
                 let vio = mix(#x0A84FF, #x007AFF, self.light)
-                sdf.rect(0.0, self.rect_size.y - 2.0, self.rect_size.x, 2.0)
-                sdf.fill(mix(vec4(0.0,0.0,0.0,0.0), vio, self.on))
+                sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, 10.0)
+                let well = mix(#x19334D, #xE5F0FF, self.light)
+                sdf.fill(mix(vec4(0.0,0.0,0.0,0.0), well, max(self.on, self.hover * 0.5)))
                 return sdf.result
             }
         }
@@ -131,7 +135,7 @@ script_mod! {
     startup() do #(App::script_component(vm)){
         ui: Root{
             main_window := Window{
-                window.title: "dorobot-nexus"
+                window.title: "Nexus Studio"
                 window.inner_size: vec2(1500, 980)
                 pass.clear_color: #x000000
 
@@ -141,15 +145,11 @@ script_mod! {
                     flow: Overlay
 
                     root_bg := mod.widgets.nx.Ground{
-                        flow: Down
+                        flow: Right
 
                         // ------------------------------------------ chrome --
                         modes := View{
-                            width: Fill height: Fit
-                            flow: Flow.Right{wrap: true}
-                            align: Align{y: 0.5}
-                            spacing: 2.0
-                            padding: Inset{left: 10. right: 12. top: 2. bottom: 0.}
+                            width: 196 height: Fill flow: Down spacing: 4.0 padding: 12.0
                             show_bg: true
                             draw_bg +: {
                                 light: instance(0.0)
@@ -160,6 +160,8 @@ script_mod! {
                                     return mix(base, edge, t)
                                 }
                             }
+                            Label{width: Fill height: 64 text: "Nexus Studio"
+                                draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_TITLE{}} }
                             tab0 := ModeTab{}
                             tab1 := ModeTab{}
                             tab2 := ModeTab{}
@@ -168,13 +170,20 @@ script_mod! {
                             tab5 := ModeTab{}
                             tab6 := ModeTab{}
                             tab7 := ModeTab{}
-                            c_state := mod.widgets.nx.ChipV{}
-                            c_steps := mod.widgets.nx.ChipV{}
-                            c_dep := mod.widgets.nx.ChipV{ visible: false }
-                            lang_btn := mod.widgets.nx.Mini{ text: "中文" }
-                            theme_btn := mod.widgets.nx.Mini{ text: "◐" }
-                            help_btn := mod.widgets.nx.Mini{ text: "?" }
+                            Filler{}
+                            lang_btn := mod.widgets.nx.NxBtn{width: Fill height: 44 text: "中文"}
+                            theme_btn := mod.widgets.nx.NxBtn{width: Fill height: 44 text: "Appearance: Auto"}
+                            help_btn := mod.widgets.nx.NxBtn{width: Fill height: 44 text: "Help"}
                         }
+                        workspace := View{width: Fill height: Fill flow: Down
+                            page_header := View{width: Fill height: Fit flow: Right padding: 18.0 spacing: 12.0 align: Align{y: 0.5}
+                                page_title := Label{width: Fill text: "Home"
+                                    draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_TITLE{font_size: 22.0}} }
+                                c_state := mod.widgets.nx.ChipV{}
+                                c_steps := mod.widgets.nx.ChipV{}
+                                c_dep := mod.widgets.nx.ChipV{visible: false}
+                                inspector_btn := mod.widgets.nx.NxBtn{height: 44 text: "Details"}
+                            }
 
                         // ------------------------------------------ canvas --
                         canvas := View{
@@ -221,6 +230,13 @@ script_mod! {
                                 width: Fill height: Fill
                                 flow: Down
                                 spacing: 8.0
+                                empty_stage := mod.widgets.nx.Panel{visible: false width: Fill height: Fill flow: Down padding: 28.0 spacing: 18.0
+                                    empty_title := Label{width: Fill text: "No training yet"
+                                        draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_TITLE{font_size: 20.0}} }
+                                    empty_description := Label{width: Fill height: Fit text: ""
+                                        draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_BODY{font_size: 12.0}} }
+                                    empty_action := Button{height: 44 text: "Choose a scene set"}
+                                }
                                 stage := mod.widgets.screens.Stage{}
                                 tl := mod.widgets.screens.TimelinePanel{}
                             }
@@ -234,6 +250,7 @@ script_mod! {
 
                         home := mod.widgets.screens.HomePage{ visible: false }
                         composer := mod.widgets.screens.ComposerStrip{ visible: false }
+                        }
                     }
 
                     // -------------------------------------------- overlays --
@@ -273,6 +290,8 @@ pub struct App {
     pub system_light: f32,
     #[rust]
     pub window_width: f64,
+    #[rust]
+    pub inspector_open: bool,
     #[rust]
     export_job: Option<crate::policy_export::Job>,
     #[live]
@@ -511,6 +530,30 @@ impl MatchEvent for App {
     }
 
     fn handle_key_down(&mut self, cx: &mut Cx, e: &KeyEvent) {
+        if self.st.modal == AppModal::None && (e.modifiers.logo || e.modifiers.control) {
+            let index = match e.key_code {
+                KeyCode::Key1 => Some(0),
+                KeyCode::Key2 => Some(1),
+                KeyCode::Key3 => Some(2),
+                KeyCode::Key4 => Some(3),
+                KeyCode::Key5 => Some(4),
+                KeyCode::Key6 => Some(5),
+                KeyCode::Key7 => Some(6),
+                KeyCode::Key8 => Some(7),
+                _ => None,
+            };
+            if let Some(index) = index {
+                self.st.mode = MODES[index];
+                self.sync_all(cx);
+                return;
+            }
+        }
+
+        if cx.has_key_focus(self.ui.widget(cx, ids!(filter_in)).area())
+            && !(e.modifiers.logo || e.modifiers.control)
+        {
+            return;
+        }
         if self.simulation.is_some() && self.st.modal == AppModal::None {
             let action = match e.key_code {
                 KeyCode::ArrowRight => Some("sim-step"),
@@ -625,6 +668,14 @@ impl App {
                 return;
             }
         }
+        if self.ui.button(cx, ids!(empty_action)).clicked(actions) {
+            self.st.mode = Mode::Scenes;
+            self.sync_all(cx);
+        }
+        if self.ui.button(cx, ids!(inspector_btn)).clicked(actions) {
+            self.inspector_open = !self.inspector_open;
+            self.sync_all(cx);
+        }
         if self.ui.button(cx, ids!(lang_btn)).clicked(actions) {
             self.st.lang = 1 - self.st.lang;
             self.sync_all(cx);
@@ -703,6 +754,41 @@ impl App {
     }
 
     fn sync_fast(&mut self, cx: &mut Cx) {
+        if std::env::var_os("DOROBOT_UX_REPORT").is_some() {
+            ux_probe::write(
+                cx,
+                &self.ui,
+                serde_json::json!({
+                    "mode": self.st.mode.label(), "theme": format!("{:?}", self.st.theme), "light": self.light(),
+                    "robot": self.st.sel.robot, "robots": self.st.robots.len(), "modal": format!("{:?}", self.st.modal),
+                    "workspace_writable": self.workspace_session.is_some(), "robot_animating": self.ui.robot_view(cx, ids!(rview)).is_animating(), "workspace_error": self.workspace_error,
+                    "inspector_open": self.inspector_open, "filter": self.st.filter
+                }),
+                &[
+                    "tab0",
+                    "tab1",
+                    "tab2",
+                    "tab3",
+                    "tab4",
+                    "tab5",
+                    "tab6",
+                    "tab7",
+                    "theme_btn",
+                    "help_btn",
+                    "lang_btn",
+                    "inspector_btn",
+                    "rail_l",
+                    "rail_r",
+                    "filter_in",
+                    "cap_btn",
+                    "stage",
+                    "modal_host",
+                    "b_rename",
+                    "modal_host.panel.foot.b_cancel",
+                ],
+            );
+        }
+
         let width = self.ui.view(cx, ids!(root_bg)).area().rect(cx).size.x;
         if width > 0. && (self.window_width - width).abs() > 1. {
             self.window_width = width;
@@ -805,6 +891,21 @@ impl App {
     }
 
     fn sync_chrome(&mut self, cx: &mut Cx, l: f32) {
+        self.ui
+            .label(cx, ids!(page_title))
+            .set_text(cx, &self.t(self.st.mode.label()));
+        self.ui.button(cx, ids!(inspector_btn)).set_text(
+            cx,
+            if self.inspector_open {
+                "Hide details"
+            } else {
+                "Details"
+            },
+        );
+        self.ui
+            .widget(cx, ids!(inspector_btn))
+            .set_visible(cx, self.st.mode != Mode::Home);
+
         let modes_bg = self.ui.view(cx, ids!(modes));
         if !modes_bg.is_empty() {
             let mut m = modes_bg.clone();
@@ -839,6 +940,8 @@ impl App {
                 draw_text +: { on: #(on) light: #(l as f64) }
             });
         }
+        let mut inspector = self.ui.button(cx, ids!(inspector_btn));
+        script_apply_eval!(cx, inspector, {draw_bg +: {light: #(l as f64)} draw_text +: {light: #(l as f64)}});
         // chips
         let running = self.st.runs.iter().find(|r| r.state == RunState::Running);
         let shown = running
@@ -900,9 +1003,9 @@ impl App {
             tb.set_text(
                 cx,
                 match self.st.theme {
-                    Theme::Auto => "◐",
-                    Theme::Light => "☀",
-                    Theme::Dark => "☾",
+                    Theme::Auto => "Appearance: Auto",
+                    Theme::Light => "Appearance: Light",
+                    Theme::Dark => "Appearance: Dark",
                 },
             );
             script_apply_eval!(cx, tb, { draw_bg +: { light: #(l as f64) } draw_text +: { light: #(l as f64) } });

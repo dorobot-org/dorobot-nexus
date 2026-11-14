@@ -19,31 +19,36 @@ pub fn sync_mode_frame(app: &mut App, cx: &mut Cx) {
     if !comp.is_empty() {
         comp.set_visible(cx, app.st.mode == Mode::Scenes);
     }
-    let (mut wl, mut wr) = match app.st.mode {
-        Mode::Scenes => (258.0, 312.0),
-        Mode::Robots => (250.0, 320.0),
-        Mode::Train => (196.0, 288.0),
-        Mode::Inspect => (250.0, 288.0),
-        Mode::Validate => (216.0, 272.0),
-        Mode::Runs => (320.0, 300.0),
-        Mode::Deploy => (252.0, 336.0),
-        Mode::Home => (252.0, 336.0),
-    };
-    if app.window_width > 0. {
-        let scale = ((app.window_width - 212.) / (wl + wr)).clamp(0.45, 1.);
-        wl *= scale;
-        wr *= scale;
+    // Preserve readable pane widths. Details replaces the collection on
+    // compact windows, and joins it when there is room for all three panes.
+    let compact = app.window_width > 0.0 && app.window_width < 1280.0;
+    let mut left = app.ui.view(cx, ids!(rail_l));
+    left.set_visible(cx, !compact || !app.inspector_open);
+    script_apply_eval!(cx, left, {width: 224.0});
+    let mut right = app.ui.view(cx, ids!(rail_r));
+    right.set_visible(cx, app.inspector_open);
+    script_apply_eval!(cx, right, {width: 288.0});
+    let idle = matches!(app.st.mode, Mode::Train | Mode::Runs) && app.st.runs.is_empty();
+    let empty = app.ui.widget(cx, ids!(empty_stage));
+    empty.set_visible(cx, idle);
+    app.ui.widget(cx, ids!(stage)).set_visible(cx, !idle);
+    app.ui.widget(cx, ids!(tl)).set_visible(cx, !idle);
+    if idle {
+        app.ui.widget(cx, ids!(rail_l)).set_visible(cx, false);
+        app.ui.label(cx, ids!(empty_title)).set_text(
+            cx,
+            if app.st.mode == Mode::Train {
+                "Start your first training run"
+            } else {
+                "Your runs will appear here"
+            },
+        );
+        app.ui.label(cx, ids!(empty_description)).set_text(cx,
+            "Choose a scene set in Scenes, or create a training task from a robot's Details. Select a compatible training backend before starting. Progress and saved checkpoints will appear here.");
     }
-    {
-        let mut rl = app.ui.view(cx, ids!(rail_l));
-        if !rl.is_empty() {
-            script_apply_eval!(cx, rl, { width: #(wl) });
-        }
-        let mut rr2 = app.ui.view(cx, ids!(rail_r));
-        if !rr2.is_empty() {
-            script_apply_eval!(cx, rr2, { width: #(wr) });
-        }
-    }
+    let light = app.light() as f64;
+    let mut empty = app.ui.view(cx, ids!(empty_stage));
+    script_apply_eval!(cx, empty, {draw_bg +: {light: #(light)}});
     sync_composer(app, cx);
 }
 
@@ -65,6 +70,20 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
     {
         let mut s = app.ui.view(cx, ids!(stage));
         script_apply_eval!(cx, s, { draw_bg +: { light: #(l as f64) } });
+    }
+    let sky = if l > 0.5 {
+        crate::tokens::pal::VOID_L
+    } else {
+        crate::tokens::pal::DEEP_D
+    };
+    let ground = if l > 0.5 {
+        crate::tokens::pal::VOID_L
+    } else {
+        crate::tokens::pal::LIFT_D
+    };
+    for id in [ids!(urdf_wrap.rview), ids!(urdf_wrap.rview_b)] {
+        let mut robot = stage.widget(cx, id);
+        script_apply_eval!(cx, robot, {sky_horizon: #(sky) sky_zenith: #(sky) ground_color: #(ground) ground2_color: #(ground)});
     }
     // The real robot in every mode, not just Robots: the selected robot when
     // one is picked, else the first that carries a URDF. A path that is not on
@@ -255,6 +274,9 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
             )
         }
         Mode::Validate if app.external_robot_run().is_some() => app.external_motion.label.clone(),
+        Mode::Validate if app.st.sweep_ckpt.is_empty() => {
+            "Select a trained checkpoint to measure robustness".into()
+        }
         Mode::Validate => format!("{} · {}", tt("sweep"), app.st.sweep_ckpt),
         Mode::Runs => match r {
             Some(r) => format!(
@@ -609,11 +631,13 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
                     tt(rc.xl)
                 )
             });
+        let measured = !app.st.sweep_ckpt.is_empty();
+        tlw.widget(cx, ids!(sec_sweep.heat))
+            .set_visible(cx, measured);
+        tlw.widget(cx, ids!(sec_sweep.ax)).set_visible(cx, measured);
         set_label(cx, &tlw, ids!(sec_sweep.ax), &ax, l);
         let sttxt = match app.st.sweep_state {
-            SweepState::Idle => tt(
-                "No surface yet — run the sweep from the left rail. 40 cells · 12 episodes each.",
-            ),
+            SweepState::Idle => tt("No measurements yet"),
             SweepState::Running => tf("sweeping {0}/40", &[&app.st.sweep_at.to_string()]),
             SweepState::Aborted => tf(
                 "abandoned at {0}/40 — partial kept",
@@ -979,9 +1003,10 @@ pub fn sync_composer(app: &mut App, cx: &mut Cx) {
                     }
                 }
                 for bp in [ids!(l), ids!(r), ids!(x)] {
-                    let b = rung.button(cx, bp);
+                    let mut b = rung.button(cx, bp);
                     if !b.is_empty() {
                         b.set_visible(cx, true);
+                        script_apply_eval!(cx, b, {draw_bg +: {light: #(l as f64)} draw_text +: {light: #(l as f64)}});
                     }
                 }
             }

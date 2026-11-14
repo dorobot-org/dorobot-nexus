@@ -87,16 +87,17 @@ script_mod! {
             visible: false
             padding: Inset{left: 2. right: 2. top: 2. bottom: 2.}
             rview := RobotView{
+                        keyboard_controls: false
                 width: Fill height: Fill
                 // This console's look, set HERE rather than defaulted in the
                 // widget (a widget default repaints every other embedder):
                 // the MuJoCo menagerie palette — blue-grey gradient sky,
                 // dark checker floor, light cell edges.
-                sky_horizon: #x26404F
-                sky_zenith: #x4D80B3
-                ground_color: #x334D66
-                ground2_color: #x1A3350
-                grid_color: #xB3B3B3
+                sky_horizon: mod.theme.color_bg_app
+                sky_zenith: mod.theme.color_bg_app
+                ground_color: mod.theme.color_bg_container
+                ground2_color: mod.theme.color_bg_container
+                grid_color: mod.theme.color_text_disabled
                 // Matte floor, stated rather than inherited. This was 0.22,
                 // which is not a reflectance: the widget implements it by
                 // drawing the robot a second time mirrored through the ground
@@ -112,9 +113,10 @@ script_mod! {
                 floor_reflectance: 0.0
             }
             rview_b := RobotView{
+                        keyboard_controls: false
                 visible: false width: Fill height: Fill
-                sky_horizon: #x26404F sky_zenith: #x4D80B3
-                ground_color: #x334D66 ground2_color: #x1A3350 grid_color: #xB3B3B3
+                sky_horizon: mod.theme.color_bg_app sky_zenith: mod.theme.color_bg_app
+                ground_color: mod.theme.color_bg_container ground2_color: mod.theme.color_bg_container grid_color: mod.theme.color_text_disabled
                 floor_reflectance: 0.0
             }
         }
@@ -307,10 +309,10 @@ script_mod! {
             flow: Down
             spacing: 6.0
             heat := Heat{ height: 150 }
-            ax := mod.widgets.nx.MonoLbl{}
+            ax := mod.widgets.nx.MonoLbl{width: Fill height: Fit}
             chips := View{
                 width: Fill height: Fit
-                flow: Right
+                flow: Flow.Right{wrap: true}
                 spacing: 6.0
                 align: Align{y: 0.5}
                 st_chip := mod.widgets.nx.ChipV{}
@@ -579,10 +581,12 @@ script_mod! {
     // --------------------------------------------------------- composer --
     mod.widgets.screens.ComposerStrip = mod.widgets.nx.Panel{
         height: Fit
-        flow: Right
+        flow: Down
         align: Align{y: 0.5}
         spacing: 6.0
         padding: Inset{left: 10. right: 10. top: 7. bottom: 7.}
+        rungs := View{width: Fill height: 60 flow: Right spacing: 8.0 align: Align{y: 0.5}
+            scroll_bars: ScrollBars{show_scroll_x: true show_scroll_y: false}
         cap := mod.widgets.nx.Cap{}
         rung0 := View{ width: Fit height: Fit flow: Right spacing: 2.0 align: Align{y: 0.5} visible: false
             l := mod.widgets.nx.Mini{ text: "◀" } n := mod.widgets.nx.InkLbl{} h := mod.widgets.nx.MonoLbl{}
@@ -602,12 +606,14 @@ script_mod! {
         rung5 := View{ width: Fit height: Fit flow: Right spacing: 2.0 align: Align{y: 0.5} visible: false
             l := mod.widgets.nx.Mini{ text: "◀" } n := mod.widgets.nx.InkLbl{} h := mod.widgets.nx.MonoLbl{}
             r := mod.widgets.nx.Mini{ text: "▶" } x := mod.widgets.nx.MiniHot{ text: "✕" } }
+        }
+        set_actions := View{width: Fill height: Fit flow: Flow.Right{wrap: true} spacing: 8.0
         b_add := mod.widgets.nx.Mini{ text: "+ add selected" }
-        Filler{}
         b_rename := mod.widgets.nx.Mini{ text: "rename" }
         b_dup := mod.widgets.nx.Mini{ text: "duplicate set" }
         budget := mod.widgets.nx.ChipV{}
         b_train := mod.widgets.nx.NxBtn{ text: "Train this set →" }
+        }
     }
 
     // ------------------------------------------------------------ toast --
@@ -1278,7 +1284,8 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                 ..Default::default()
             });
             specs.push(LSpec {
-                row: Some((st.sweep_ckpt.clone(), String::new(), None, true, false)),
+                row: (!st.sweep_ckpt.is_empty())
+                    .then(|| (st.sweep_ckpt.clone(), String::new(), None, true, false)),
                 ..Default::default()
             });
             let mut sp = LSpec::default();
