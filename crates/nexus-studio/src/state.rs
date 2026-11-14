@@ -7,7 +7,7 @@
 
 // ---------------------------------------------------------------- scenes --
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Scene {
     pub id: String,
     pub name: String,
@@ -48,15 +48,21 @@ impl Scene {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SceneSet {
     pub id: String,
     pub name: String,
     pub members: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Robot {
+    #[serde(default)]
+    pub use_task: bool,
+    #[serde(default)]
+    pub task: Option<crate::task_config::Config>,
+    #[serde(default)]
+    pub model_name: Option<String>,
     pub id: String,
     pub name: String,
     pub links: u32,
@@ -68,8 +74,18 @@ pub struct Robot {
     pub urdf: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+impl Robot {
+    pub fn model_name(&self) -> &str {
+        self.model_name.as_deref().unwrap_or(&self.name)
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Recording {
+    #[serde(default)]
+    pub robot: Option<String>,
+    #[serde(default)]
+    pub run: Option<String>,
     pub id: String,
     pub name: String,
     pub scene: String,
@@ -82,8 +98,12 @@ pub struct Recording {
 
 // ------------------------------------------------------------------ runs --
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RunState {
+    Queued,
+    Starting,
+    Stopping,
+    Unknown,
     Running,
     Paused,
     Stopped,
@@ -94,6 +114,10 @@ pub enum RunState {
 impl RunState {
     pub fn key(self) -> &'static str {
         match self {
+            RunState::Queued => "queued",
+            RunState::Starting => "connecting",
+            RunState::Stopping => "stopping",
+            RunState::Unknown => "worker unknown",
             RunState::Running => "running",
             RunState::Paused => "paused",
             RunState::Stopped => "stopped",
@@ -103,24 +127,32 @@ impl RunState {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CkSt {
     Ord,
     Best,
     Prom,
 }
 
-#[derive(Clone, Debug)]
+fn score_known_default() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Ckpt {
     pub id: String,
     pub label: String,
     pub score: f64,
+    #[serde(default = "score_known_default")]
+    pub score_known: bool,
     pub st: CkSt,
     pub pname: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CfgScene {
+    #[serde(default)]
+    pub full: Option<Scene>,
     pub name: String,
     pub stance: f64,
     pub terrain: String,
@@ -130,16 +162,40 @@ pub struct CfgScene {
     pub push: f64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub additional_iterations: Option<u32>,
+    #[serde(default)]
+    pub robot_id: Option<String>,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub training_profile: Option<serde_json::Value>,
+    #[serde(default)]
+    pub robot: Option<String>,
     pub scenes: usize,
     pub seed: String,
     pub warm: Option<String>,
     pub cfg: Vec<CfgScene>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RunMetric {
+    #[serde(default)]
+    pub fall_rate_unmeasured: bool,
+    pub step: u64,
+    pub reward: f64,
+    pub fall_rate: f64,
+    pub steps_per_sec: f64,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Run {
+    #[serde(default)]
+    pub job: Option<crate::jobs::Job>,
+    #[serde(default)]
+    pub metrics: Vec<RunMetric>,
     pub id: String,
     pub name: String,
     pub set: String,
@@ -169,7 +225,13 @@ pub enum Ping {
     Bad,
 }
 
-#[derive(Clone, Debug)]
+impl Default for Ping {
+    fn default() -> Self {
+        Self::Unprobed
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Target {
     pub id: String,
     pub name: String,
@@ -179,6 +241,7 @@ pub struct Target {
     pub sdk: String,
     pub cap: u32,
     pub rev: u32,
+    #[serde(skip, default)]
     pub ping: Ping,
 }
 
@@ -274,7 +337,12 @@ pub enum GateId {
     Sim2sim,
     Dryrun,
 }
-pub const GATES: [GateId; 4] = [GateId::Export, GateId::Compat, GateId::Sim2sim, GateId::Dryrun];
+pub const GATES: [GateId; 4] = [
+    GateId::Export,
+    GateId::Compat,
+    GateId::Sim2sim,
+    GateId::Dryrun,
+];
 
 #[derive(Clone, Debug, Default)]
 pub struct Dg {
@@ -333,7 +401,13 @@ pub struct DgLive {
 
 impl Default for DgLive {
     fn default() -> Self {
-        DgLive { torq: 36, herr: 0.006, dwell: 0, unlocked: false, tick: 0 }
+        DgLive {
+            torq: 36,
+            herr: 0.006,
+            dwell: 0,
+            unlocked: false,
+            tick: 0,
+        }
     }
 }
 
@@ -341,6 +415,7 @@ impl Default for DgLive {
 
 #[derive(Clone, Debug)]
 pub struct Live {
+    pub falls_unmeasured: bool,
     pub playing: bool,
     pub frame: u32,
     pub frames: u32,
@@ -364,7 +439,7 @@ pub struct Live {
 
 // -------------------------------------------------------------- app-level --
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     Home,
     Scenes,
@@ -402,7 +477,7 @@ impl Mode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Theme {
     Auto,
     Light,
@@ -420,12 +495,37 @@ pub enum SweepState {
 /// One reversible deletion, carried by a toast's Undo button.
 #[derive(Clone, Debug)]
 pub enum UndoAction {
-    RestoreScene { scene: Scene, idx: usize },
-    RestoreRecording { rec: Recording, idx: usize },
-    RestoreRun { run: Run, idx: usize, took_from_kept: Vec<String> },
-    RestoreTarget { target: Target, idx: usize },
-    RestoreMember { set: String, idx: usize, member: String },
-    RestoreCkpt { run: String, idx: usize, ck: Ckpt },
+    RestoreRobot {
+        robot: Robot,
+        idx: usize,
+    },
+    RestoreScene {
+        scene: Scene,
+        idx: usize,
+    },
+    RestoreRecording {
+        rec: Recording,
+        idx: usize,
+    },
+    RestoreRun {
+        run: Run,
+        idx: usize,
+        took_from_kept: Vec<String>,
+    },
+    RestoreTarget {
+        target: Target,
+        idx: usize,
+    },
+    RestoreMember {
+        set: String,
+        idx: usize,
+        member: String,
+    },
+    RestoreCkpt {
+        run: String,
+        idx: usize,
+        ck: Ckpt,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -443,17 +543,64 @@ pub enum AppModal {
     LastSceneBlocked,
     AddToSet,
     RenameSet,
+    RenameRobot,
+    TaskEditor,
+    ReviewEdit,
+    ReviewExport,
+    SimulationCommand,
+    SimulationPush,
+    SimulationImport,
+    Evaluation,
+    EvaluationExport,
+    AgentArm,
+    AgentCommand,
+    QueueSettings {
+        page: usize,
+        draft: crate::jobs::Settings,
+    },
+    RemoveRobot,
+    ImportRobot {
+        path: String,
+        summary: Option<String>,
+    },
+    ExportRobot,
+    ContinueRun,
+    ExportPolicy {
+        checkpoint: String,
+    },
+    ArtifactRetention,
+    ArtifactCleanup {
+        page: usize,
+    },
+    Trash {
+        page: usize,
+    },
+    RestoreTrash {
+        id: String,
+    },
+    PurgeTrash {
+        id: String,
+    },
     Preflight,
     Rerun,
     DeleteRun,
-    PromoteCk { ck_id: String },
+    PromoteCk {
+        ck_id: String,
+    },
     RemoveRobotBlocked,
-    Wizard { step: u32 },
-    TargetForm { edit: Option<String> },
-    RemoveTargetBlocked { held: String },
+    Wizard {
+        step: u32,
+    },
+    TargetForm {
+        edit: Option<String>,
+    },
+    RemoveTargetBlocked {
+        held: String,
+    },
     Arm,
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Sel {
     pub scene: Option<String>,
     pub set: Option<String>,
@@ -473,11 +620,56 @@ pub struct Sel {
 /// `#[cfg(test)]` so that it cannot become a screen's data again.
 #[cfg(test)]
 pub const SWEEP_REF: [[Option<f64>; 8]; 5] = [
-    [Some(0.81), Some(0.86), Some(0.90), Some(0.88), Some(0.84), Some(0.61), Some(0.55), Some(0.28)],
-    [Some(0.77), Some(0.85), Some(0.92), Some(0.94), Some(0.89), Some(0.79), Some(0.58), Some(0.31)],
-    [Some(0.64), Some(0.80), Some(0.88), Some(0.91), Some(0.86), Some(0.75), Some(0.52), Some(0.26)],
-    [Some(0.33), Some(0.57), Some(0.76), Some(0.82), Some(0.78), Some(0.60), Some(0.35), Some(0.19)],
-    [Some(0.11), Some(0.24), Some(0.51), Some(0.58), Some(0.54), Some(0.30), None, None],
+    [
+        Some(0.81),
+        Some(0.86),
+        Some(0.90),
+        Some(0.88),
+        Some(0.84),
+        Some(0.61),
+        Some(0.55),
+        Some(0.28),
+    ],
+    [
+        Some(0.77),
+        Some(0.85),
+        Some(0.92),
+        Some(0.94),
+        Some(0.89),
+        Some(0.79),
+        Some(0.58),
+        Some(0.31),
+    ],
+    [
+        Some(0.64),
+        Some(0.80),
+        Some(0.88),
+        Some(0.91),
+        Some(0.86),
+        Some(0.75),
+        Some(0.52),
+        Some(0.26),
+    ],
+    [
+        Some(0.33),
+        Some(0.57),
+        Some(0.76),
+        Some(0.82),
+        Some(0.78),
+        Some(0.60),
+        Some(0.35),
+        Some(0.19),
+    ],
+    [
+        Some(0.11),
+        Some(0.24),
+        Some(0.51),
+        Some(0.58),
+        Some(0.54),
+        Some(0.30),
+        None,
+        None,
+    ],
 ];
 
 pub struct Recipe {
@@ -522,6 +714,9 @@ pub const RECIPES: [Recipe; 2] = [
 // ==========================================================================
 
 pub struct Store {
+    pub job_settings: crate::jobs::Settings,
+    pub queue_enabled: bool,
+    pub demo: bool,
     pub mode: Mode,
     pub lang: usize, // 0 en, 1 zh
     pub theme: Theme,
@@ -536,6 +731,7 @@ pub struct Store {
     pub dg_live: DgLive,
     pub sel: Sel,
     pub draft: Option<Scene>,
+    pub task_draft: Option<crate::task_config::Draft>,
     pub dirty: bool,
     pub filter: String,
     pub live: Live,
@@ -546,6 +742,8 @@ pub struct Store {
     pub sweep_ckpt: String,
     pub sweep_baseline: bool,
     pub toasts: Vec<Toast>,
+    pub trash: Vec<crate::artifacts::TrashEntry>,
+    pub retention_keep: usize,
     pub modal: AppModal,
     pub uid: u64,
     pub wiz_file: Option<String>,
@@ -563,11 +761,45 @@ pub struct Store {
 
 impl Default for Store {
     fn default() -> Self {
-        Store::seed()
+        if std::env::args().any(|a| a == "--demo") {
+            Store::seed()
+        } else {
+            Store::production()
+        }
     }
 }
 
 impl Store {
+    pub fn production() -> Self {
+        let mut s = Self::seed();
+        s.demo = false;
+        s.runs.clear();
+        s.recordings.clear();
+        s.deploys.clear();
+        s.targets.clear();
+        s.dg = Dg::default();
+        s.sel.run = None;
+        s.live.real = true;
+        s.live.playing = false;
+        s.live.frame = 0;
+        s.live.frames = 0;
+        s.live.reward = 0.0;
+        s.live.falls = 0.0;
+        s.live.now = 0.0;
+        s.live.hist.clear();
+        s.live.now_hist.clear();
+        s.live.hist_full.clear();
+        s.sweep_ckpt.clear();
+        s.uid = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        if let Err(e) = crate::workspace::restore(&mut s) {
+            s.toast(format!("Workspace could not be restored: {e}"));
+        }
+        s
+    }
+
     pub fn seed() -> Self {
         let mk = |id: &str, name: &str, f: &dyn Fn(&mut Scene)| {
             let mut s = Scene::base(id, name);
@@ -586,71 +818,85 @@ impl Store {
             mk("s9", "stairs-probe", &|s| s.terrain = "step".into()),
         ];
         let sets = vec![
-            SceneSet { id: "t1".into(), name: "crouch ladder".into(), members: vec!["s1".into(), "s2".into(), "s3".into(), "s4".into()] },
-            SceneSet { id: "t2".into(), name: "robustness".into(), members: vec!["s5".into(), "s6".into(), "s7".into()] },
+            SceneSet {
+                id: "t1".into(),
+                name: "crouch ladder".into(),
+                members: vec!["s1".into(), "s2".into(), "s3".into(), "s4".into()],
+            },
+            SceneSet {
+                id: "t2".into(),
+                name: "robustness".into(),
+                members: vec!["s5".into(), "s6".into(), "s7".into()],
+            },
         ];
         let ladder_cfg = || {
-            [("warm-start", 0.82), ("descend-70", 0.70), ("descend-62", 0.62), ("target-60", 0.60)]
-                .iter()
-                .map(|(n, st)| CfgScene {
-                    name: (*n).into(),
-                    stance: *st,
-                    terrain: String::new(),
-                    friction: 1.0,
-                    kp: 1.0,
-                    mass: 1.0,
-                    push: 0.0,
-                })
-                .collect::<Vec<_>>()
+            [
+                ("warm-start", 0.82),
+                ("descend-70", 0.70),
+                ("descend-62", 0.62),
+                ("target-60", 0.60),
+            ]
+            .iter()
+            .map(|(n, st)| CfgScene {
+                full: None,
+                name: (*n).into(),
+                stance: *st,
+                terrain: String::new(),
+                friction: 1.0,
+                kp: 1.0,
+                mass: 1.0,
+                push: 0.0,
+            })
+            .collect::<Vec<_>>()
         };
         let ladder = ["warm-start", "descend-70", "descend-62", "target-60"];
         let runs = vec![
-            Run {
+            Run { job: None, metrics: vec![],
                 id: "run3".into(), name: "crouch-v3".into(), set: "crouch ladder".into(),
                 state: RunState::Running, archived: false, coll: false,
                 steps: 2.10, best: Some(-0.260), stage: 2,
                 stages: ladder.iter().map(|s| s.to_string()).collect(),
                 round: 4, iter: 268, iters_per: 400,
-                snapshot: Snapshot { scenes: 4, seed: "0xC0FFEE".into(), warm: None, cfg: ladder_cfg() },
+                snapshot: Snapshot { additional_iterations: None, robot_id: None, backend: None, training_profile: None, robot: Some("Unitree G1-29dof".into()), scenes: 4, seed: "0xC0FFEE".into(), warm: None, cfg: ladder_cfg() },
                 ckpts: vec![
-                    Ckpt { id: "c4".into(), label: "ck-2100k".into(), score: -0.260, st: CkSt::Best, pname: None },
-                    Ckpt { id: "c3".into(), label: "ck-1850k".into(), score: -0.288, st: CkSt::Ord, pname: None },
-                    Ckpt { id: "c2".into(), label: "ck-1600k".into(), score: -0.334, st: CkSt::Ord, pname: None },
-                    Ckpt { id: "c1".into(), label: "ck-1350k".into(), score: -0.361, st: CkSt::Ord, pname: None },
+                    Ckpt { score_known: true, id: "c4".into(), label: "ck-2100k".into(), score: -0.260, st: CkSt::Best, pname: None },
+                    Ckpt { score_known: true, id: "c3".into(), label: "ck-1850k".into(), score: -0.288, st: CkSt::Ord, pname: None },
+                    Ckpt { score_known: true, id: "c2".into(), label: "ck-1600k".into(), score: -0.334, st: CkSt::Ord, pname: None },
+                    Ckpt { score_known: true, id: "c1".into(), label: "ck-1350k".into(), score: -0.361, st: CkSt::Ord, pname: None },
                 ],
                 diagnosis: None,
             },
-            Run {
+            Run { job: None, metrics: vec![],
                 id: "run2".into(), name: "crouch-v2".into(), set: "crouch ladder".into(),
                 state: RunState::Completed, archived: false, coll: false,
                 steps: 3.20, best: Some(-0.212), stage: 3,
                 stages: ladder.iter().map(|s| s.to_string()).collect(),
                 round: 6, iter: 400, iters_per: 400,
-                snapshot: Snapshot { scenes: 4, seed: "0xC0FFEE".into(), warm: None, cfg: ladder_cfg() },
+                snapshot: Snapshot { additional_iterations: None, robot_id: None, backend: None, training_profile: None, robot: Some("Unitree G1-29dof".into()), scenes: 4, seed: "0xC0FFEE".into(), warm: None, cfg: ladder_cfg() },
                 ckpts: vec![
-                    Ckpt { id: "c9".into(), label: "ck-3200k".into(), score: -0.212, st: CkSt::Prom, pname: Some("crouch-v2-final".into()) },
-                    Ckpt { id: "c8".into(), label: "ck-2950k".into(), score: -0.231, st: CkSt::Ord, pname: None },
+                    Ckpt { score_known: true, id: "c9".into(), label: "ck-3200k".into(), score: -0.212, st: CkSt::Prom, pname: Some("crouch-v2-final".into()) },
+                    Ckpt { score_known: true, id: "c8".into(), label: "ck-2950k".into(), score: -0.231, st: CkSt::Ord, pname: None },
                 ],
                 diagnosis: None,
             },
-            Run {
+            Run { job: None, metrics: vec![],
                 id: "run1".into(), name: "flat-first".into(), set: "crouch ladder".into(),
                 state: RunState::Failed, archived: false, coll: false,
                 steps: 0.006, best: None, stage: 0,
                 stages: vec!["warm-start".into()],
                 round: 1, iter: 1, iters_per: 400,
-                snapshot: Snapshot { scenes: 4, seed: "0xC0FFEE".into(), warm: None, cfg: ladder_cfg() },
+                snapshot: Snapshot { additional_iterations: None, robot_id: None, backend: None, training_profile: None, robot: Some("Unitree G1-29dof".into()), scenes: 4, seed: "0xC0FFEE".into(), warm: None, cfg: ladder_cfg() },
                 ckpts: vec![],
                 diagnosis: Some("non-finite reward at iteration 0 — physics produced NaN before the first update".into()),
             },
-            Run {
+            Run { job: None, metrics: vec![],
                 id: "run0".into(), name: "stand-only".into(), set: "robustness".into(),
                 state: RunState::Completed, archived: true, coll: false,
                 steps: 1.00, best: Some(-0.41), stage: 0,
                 stages: vec!["slippery".into(), "heavy".into(), "shoved".into()],
                 round: 2, iter: 400, iters_per: 400,
-                snapshot: Snapshot { scenes: 3, seed: "0x5EED".into(), warm: None, cfg: vec![] },
-                ckpts: vec![Ckpt { id: "c0".into(), label: "ck-1000k".into(), score: -0.41, st: CkSt::Ord, pname: None }],
+                snapshot: Snapshot { additional_iterations: None, robot_id: None, backend: None, training_profile: None, robot: Some("Unitree G1-29dof".into()), scenes: 3, seed: "0x5EED".into(), warm: None, cfg: vec![] },
+                ckpts: vec![Ckpt { score_known: true, id: "c0".into(), label: "ck-1000k".into(), score: -0.41, st: CkSt::Ord, pname: None }],
                 diagnosis: None,
             },
         ];
@@ -662,14 +908,25 @@ impl Store {
             now_hist.push(0.62 + (0.82 - 0.62) * (-fi / 16.0).exp() + (fi * 1.3).sin() * 0.004);
         }
         Store {
+            job_settings: Default::default(),
+            queue_enabled: true,
+            demo: true,
             mode: Mode::Home,
             lang: 0,
             theme: Theme::Auto,
             scenes,
             sets,
             robots: vec![Robot {
-                id: "r1".into(), name: "Unitree G1-29dof".into(),
-                links: 39, joints: 38, movable: 29, mapped: 12, meshes: 35,
+                task: None,
+                use_task: false,
+                model_name: None,
+                id: "r1".into(),
+                name: "Unitree G1-29dof".into(),
+                links: 39,
+                joints: 38,
+                movable: 29,
+                mapped: 12,
+                meshes: 35,
                 used_by: vec!["every scene".into()],
                 urdf: {
                     let p = format!("{}/data/g1/g1.urdf", crate::nexus::repo_dir());
@@ -677,23 +934,72 @@ impl Store {
                 },
             }],
             runs,
-            recordings: vec![Recording { id: "rec1".into(), name: "descend-62-001".into(), scene: "descend-62".into(), frames: 301, resets: 4, dist: 1.62, path: None }],
+            recordings: vec![Recording {
+                robot: None,
+                run: None,
+                id: "rec1".into(),
+                name: "descend-62-001".into(),
+                scene: "descend-62".into(),
+                frames: 301,
+                resets: 4,
+                dist: 1.62,
+                path: None,
+            }],
             targets: vec![
-                Target { id: "tg1".into(), name: "g1-lab-A".into(), model: "G1-29dof".into(), iface: "eth0".into(), ip: "192.168.123.161".into(), sdk: "unitree_sdk2 2.0".into(), cap: 70, rev: 0, ping: Ping::Unprobed },
-                Target { id: "tg2".into(), name: "g1-field".into(), model: "G1-29dof".into(), iface: "wlan1".into(), ip: "10.0.4.77".into(), sdk: "unitree_sdk2 2.0".into(), cap: 50, rev: 0, ping: Ping::Unprobed },
+                Target {
+                    id: "tg1".into(),
+                    name: "g1-lab-A".into(),
+                    model: "G1-29dof".into(),
+                    iface: "eth0".into(),
+                    ip: "192.0.2.161".into(),
+                    sdk: "unitree_sdk2 2.0".into(),
+                    cap: 70,
+                    rev: 0,
+                    ping: Ping::Unprobed,
+                },
+                Target {
+                    id: "tg2".into(),
+                    name: "g1-field".into(),
+                    model: "G1-29dof".into(),
+                    iface: "wlan1".into(),
+                    ip: "198.51.100.77".into(),
+                    sdk: "unitree_sdk2 2.0".into(),
+                    cap: 50,
+                    rev: 0,
+                    ping: Ping::Unprobed,
+                },
             ],
             deploys: vec![Deploy {
-                id: "d1".into(), name: "dep-001".into(), ck: "crouch-v2|ck-3200k".into(),
-                pname: "crouch-v2-final".into(), target: "g1-lab-A".into(), tg_id: "tg1".into(), tg_rev: 0,
-                hash: "77c1d40b".into(), state: DepState::Superseded, stage: 2,
-                tg_snap: Some(TgSnap { model: "G1-29dof".into(), ip: "192.168.123.161".into(), iface: "eth0".into(), sdk: "unitree_sdk2 2.0".into(), cap: 70 }),
+                id: "d1".into(),
+                name: "dep-001".into(),
+                ck: "crouch-v2|ck-3200k".into(),
+                pname: "crouch-v2-final".into(),
+                target: "g1-lab-A".into(),
+                tg_id: "tg1".into(),
+                tg_rev: 0,
+                hash: "77c1d40b".into(),
+                state: DepState::Superseded,
+                stage: 2,
+                tg_snap: Some(TgSnap {
+                    model: "G1-29dof".into(),
+                    ip: "192.0.2.161".into(),
+                    iface: "eth0".into(),
+                    sdk: "unitree_sdk2 2.0".into(),
+                    cap: 70,
+                }),
                 gate_rep: vec![
-                    Line::arg("onnx opset 17 · {0} KB · id {1}", vec!["407".into(), "77c1d40b".into()]),
+                    Line::arg(
+                        "onnx opset 17 · {0} KB · id {1}",
+                        vec!["407".into(), "77c1d40b".into()],
+                    ),
                     Line::new("compat 5/5 · 1 accepted note"),
                     Line::new("sim2sim 24 eps · surv 97% · drift 5.9%"),
                     Line::new("dry-run · sat 8% · jerk p99 0.3"),
                 ],
-                chk: [true; 4], signer: "operator".into(), ts: "—".into(), pair: String::new(),
+                chk: [true; 4],
+                signer: "operator".into(),
+                ts: "—".into(),
+                pair: String::new(),
                 note: Some(Line::new("superseded by a newer policy on this target")),
                 events: vec![
                     Line::arg("armed at {0}% torque cap", vec!["40".into()]),
@@ -702,20 +1008,40 @@ impl Store {
                     Line::new("rollout complete at 100%"),
                 ],
             }],
-            dg: Dg { target: Some("tg1".into()), ..Default::default() },
+            dg: Dg {
+                target: Some("tg1".into()),
+                ..Default::default()
+            },
             dg_live: DgLive::default(),
             sel: Sel {
-                scene: Some("s3".into()), set: Some("t1".into()), robot: Some("r1".into()),
-                run: Some("run3".into()), ck: None, ck_run: None, cell: None, dep: None, recipe: 0,
+                scene: Some("s3".into()),
+                set: Some("t1".into()),
+                robot: Some("r1".into()),
+                run: Some("run3".into()),
+                ck: None,
+                ck_run: None,
+                cell: None,
+                dep: None,
+                recipe: 0,
             },
             draft: None,
+            task_draft: None,
             dirty: false,
             filter: String::new(),
             live: Live {
-                playing: true, frame: 184, frames: 301, now: 0.641,
-                reward: -0.2604, falls: 16.6, kl: 0.0103, lr: "7.6e-5".into(),
-                hist, now_hist,
-                real: false, sps: 0.0,
+                playing: true,
+                frame: 184,
+                frames: 301,
+                now: 0.641,
+                reward: -0.2604,
+                falls: 16.6,
+                falls_unmeasured: false,
+                kl: 0.0103,
+                lr: "7.6e-5".into(),
+                hist,
+                now_hist,
+                real: false,
+                sps: 0.0,
                 hist_full: vec![],
             },
             cell_phys: None,
@@ -725,6 +1051,8 @@ impl Store {
             sweep_ckpt: "ck-2100k".into(),
             sweep_baseline: true,
             toasts: vec![],
+            trash: vec![],
+            retention_keep: 4,
             modal: AppModal::None,
             uid: 100,
             wiz_file: None,
@@ -775,16 +1103,29 @@ impl Store {
                 return s.clone();
             }
         }
-        self.scenes.first().cloned().unwrap_or_else(|| Scene::base("s0", "—"))
+        self.scenes
+            .first()
+            .cloned()
+            .unwrap_or_else(|| Scene::base("s0", "—"))
     }
 
     pub fn sets_of(&self, scene_id: &str) -> Vec<&SceneSet> {
-        self.sets.iter().filter(|s| s.members.iter().any(|m| m == scene_id)).collect()
+        self.sets
+            .iter()
+            .filter(|s| s.members.iter().any(|m| m == scene_id))
+            .collect()
     }
 
     pub fn sweep_pass(&self) -> u32 {
-        let Some(grid) = &self.sweep_grid else { return 0 };
-        let m: Vec<f64> = grid.iter().flatten().take(self.sweep_at).filter_map(|v| *v).collect();
+        let Some(grid) = &self.sweep_grid else {
+            return 0;
+        };
+        let m: Vec<f64> = grid
+            .iter()
+            .flatten()
+            .take(self.sweep_at)
+            .filter_map(|v| *v)
+            .collect();
         if m.is_empty() {
             return 0;
         }
@@ -793,11 +1134,19 @@ impl Store {
 
     pub fn toast(&mut self, text: String) {
         let born = self.clock;
-        self.toasts.push(Toast { text, undo: None, born });
+        self.toasts.push(Toast {
+            text,
+            undo: None,
+            born,
+        });
     }
     pub fn toast_undo(&mut self, text: String, undo: UndoAction) {
         let born = self.clock;
-        self.toasts.push(Toast { text, undo: Some(undo), born });
+        self.toasts.push(Toast {
+            text,
+            undo: Some(undo),
+            born,
+        });
     }
 
     // -------------------------------------------------- certification core --

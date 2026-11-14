@@ -38,7 +38,16 @@ const TERMS: [&str; 4] = ["track_lin_vel", "upright", "action_rate", "torque_leg
 pub fn binary_path() -> PathBuf {
     std::env::var("DOROBOT_ZEALOT_BIN")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_BIN))
+        .unwrap_or_else(|_| {
+            let relative = PathBuf::from(DEFAULT_BIN);
+            if relative.is_file() {
+                relative
+            } else {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../..")
+                    .join(DEFAULT_BIN)
+            }
+        })
 }
 
 /// True when the zealot stack has been built on this machine.
@@ -78,7 +87,10 @@ pub fn ensure_terrain_mesh(scene: &crate::scene::Scene) -> Option<PathBuf> {
     }
     let exporter = terrain_export_path();
     if !exporter.is_file() {
-        eprintln!("terrain: {} missing and no exporter to build it", path.display());
+        eprintln!(
+            "terrain: {} missing and no exporter to build it",
+            path.display()
+        );
         return None;
     }
     // The exporter writes all four families for these parameters in one pass,
@@ -253,7 +265,11 @@ impl RolloutSlot {
     }
 
     pub fn len(&self) -> usize {
-        self.0.lock().ok().and_then(|g| g.as_ref().map(|r| r.len())).unwrap_or(0)
+        self.0
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|r| r.len()))
+            .unwrap_or(0)
     }
 
     /// The rollout's control period. Playback uses it to run at the rate the
@@ -279,7 +295,12 @@ pub struct Drive {
 
 impl Default for Drive {
     fn default() -> Self {
-        Self { vx: 0.3, vy: 0.0, yaw_rate: 0.0, seconds: 3.0 }
+        Self {
+            vx: 0.3,
+            vy: 0.0,
+            yaw_rate: 0.0,
+            seconds: 3.0,
+        }
     }
 }
 
@@ -346,7 +367,9 @@ pub fn urdf_joint_names(urdf: &std::path::Path) -> Vec<String> {
     };
     let mut names = Vec::new();
     for chunk in strip_comments(&text).split("<joint").skip(1) {
-        let Some(i) = chunk.find("name=\"") else { continue };
+        let Some(i) = chunk.find("name=\"") else {
+            continue;
+        };
         let rest = &chunk[i + 6..];
         let Some(end) = rest.find('"') else { continue };
         names.push(rest[..end].to_string());
@@ -376,7 +399,11 @@ impl Rollout {
     /// app uses are kept — the body-position `frames` array is by far the
     /// largest and nothing here reads it.
     pub fn to_json(&self) -> String {
-        let names: Vec<String> = self.joint_names.iter().map(|n| format!("\"{n}\"")).collect();
+        let names: Vec<String> = self
+            .joint_names
+            .iter()
+            .map(|n| format!("\"{n}\""))
+            .collect();
         let rows = |v: &[Vec<f32>]| -> String {
             v.iter()
                 .map(|r| {
@@ -459,7 +486,9 @@ fn number(text: &str, key: &str) -> Option<f32> {
     let start = after_key(text, key)?;
     let rest = text[start..].trim_start();
     let end = rest
-        .find(|c: char| !(c.is_ascii_digit() || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'))
+        .find(|c: char| {
+            !(c.is_ascii_digit() || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E')
+        })
         .unwrap_or(rest.len());
     rest[..end].parse().ok()
 }
@@ -546,8 +575,19 @@ pub fn spawn_curriculum(
     rounds: usize,
     ckpt: &str,
 ) -> Option<Handle> {
+    spawn_curriculum_budgeted(scenes, envs, iters_each, rounds, ckpt, None)
+}
+
+pub fn spawn_curriculum_budgeted(
+    scenes: Vec<(String, Vec<(&'static str, String)>)>,
+    envs: usize,
+    iters_each: u64,
+    rounds: usize,
+    ckpt: &str,
+    additional_iterations: Option<u64>,
+) -> Option<Handle> {
     let bin = binary_path();
-    if !bin.is_file() || scenes.is_empty() {
+    if !bin.is_file() || scenes.is_empty() || envs < 32 || iters_each == 0 || rounds == 0 {
         return None;
     }
     let shared = Arc::new(Mutex::new(Shared {
@@ -555,6 +595,7 @@ pub fn spawn_curriculum(
         running: true,
         envs,
         total_steps: 0,
+        ..Shared::default()
     }));
     let (tx, rx) = mpsc::channel();
     let s = Arc::clone(&shared);
@@ -578,35 +619,89 @@ pub fn spawn_curriculum(
 
     thread::spawn(move || {
         let mut cumulative: u64 = 0;
+        let rounds = additional_iterations
+            .map(|n| n.div_ceil(iters_each * scenes.len() as u64) as usize)
+            .unwrap_or(rounds);
+        let mut launched_iterations = 0;
         'outer: for round in 0..rounds.max(1) {
             for (name, knobs) in &scenes {
                 if stopped.load(Ordering::Relaxed) {
                     break 'outer;
                 }
+                let iterations = additional_iterations
+                    .map(|total| iters_each.min(total.saturating_sub(launched_iterations)))
+                    .unwrap_or(iters_each);
+                if iterations == 0 {
+                    break 'outer;
+                }
+                launched_iterations += iterations;
                 let mut c = Command::new(&bin);
-                c.arg(iters_each.to_string())
+                c.arg(iterations.to_string())
                     .arg(envs.to_string())
                     .arg(&ckpt)
                     .stdout(Stdio::piped())
-                    .stderr(Stdio::null());
+                    .stderr(
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(format!("{ckpt}.stderr.log"))
+                            .map(Stdio::from)
+                            .unwrap_or_else(|_| Stdio::inherit()),
+                    );
                 for (k, v) in knobs {
                     c.env(k, v);
                 }
-                let Ok(mut child) = c.spawn() else { continue };
-                let Some(stdout) = child.stdout.take() else { continue };
+                let mut child = match c.spawn() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        if let Ok(mut g) = s.lock() {
+                            g.error = Some(format!("trainer failed to start: {e}"));
+                        }
+                        break 'outer;
+                    }
+                };
+                let Some(stdout) = child.stdout.take() else {
+                    continue;
+                };
                 if let Ok(mut g) = current.lock() {
+                    if stopped.load(Ordering::Relaxed) {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break 'outer;
+                    }
                     *g = Some(child);
                 }
                 eprintln!("curriculum: round {} · scene '{name}'", round + 1);
 
+                let mut log = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(format!("{ckpt}.metrics.log"))
+                    .ok();
                 let mut pending = Row::default();
                 for line in BufReader::new(stdout).lines() {
                     let Ok(line) = line else { break };
+                    if let Some(file) = &mut log {
+                        use std::io::Write;
+                        let _ = writeln!(file, "{line}");
+                    }
                     if let Some(row) = parse_row(&line) {
+                        if !row.reward.is_finite() {
+                            if let Ok(mut g) = s.lock() {
+                                g.error = Some("G1 trainer emitted a non-finite reward".into());
+                            }
+                            if let Ok(mut g) = current.lock() {
+                                if let Some(c) = g.as_mut() {
+                                    let _ = c.kill();
+                                }
+                            }
+                            break;
+                        }
                         pending = row;
                     } else if let Some(rb) = parse_rb(&line) {
                         cumulative += rb.samples;
                         let sample = Sample {
+                            fall_rate_unmeasured: rb.samples == 0,
                             step: cumulative,
                             reward: pending.reward,
                             terms: TERMS.iter().map(|t| rb.term(t)).collect(),
@@ -634,14 +729,36 @@ pub fn spawn_curriculum(
                 }
                 if let Ok(mut g) = current.lock() {
                     if let Some(c) = g.as_mut() {
-                        let _ = c.kill();
-                        let _ = c.wait();
+                        match c.wait() {
+                            Ok(status) if !status.success() && !stopped.load(Ordering::Relaxed) => {
+                                if let Ok(mut s) = s.lock() {
+                                    s.error.get_or_insert(format!(
+                                        "G1 trainer exited with {status}; see {ckpt}.stderr.log"
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                if let Ok(mut s) = s.lock() {
+                                    s.error = Some(e.to_string());
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     *g = None;
+                }
+                if s.lock().map(|g| g.error.is_some()).unwrap_or(true) {
+                    break 'outer;
                 }
             }
         }
         if let Ok(mut g) = s.lock() {
+            if !stopped.load(Ordering::Relaxed)
+                && g.error.is_none()
+                && (g.samples.is_empty() || !std::path::Path::new(&ckpt).is_file())
+            {
+                g.error = Some("G1 trainer finished without metrics or a checkpoint".into());
+            }
             g.running = false;
         }
     });
@@ -650,107 +767,7 @@ pub fn spawn_curriculum(
 }
 
 pub fn spawn(envs: usize, iters: u64, ckpt: &str) -> Option<Handle> {
-    let bin = binary_path();
-    if !bin.is_file() {
-        return None;
-    }
-
-    let child = Command::new(&bin)
-        .arg(iters.to_string())
-        .arg(envs.to_string())
-        .arg(ckpt)
-        // zealot prints its metric table to stdout and its banners to stderr.
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    let shared = Arc::new(Mutex::new(Shared {
-        samples: Vec::new(),
-        running: true,
-        envs,
-        // zealot counts iterations; the step budget is only known once it
-        // reports how many samples an iteration produced.
-        total_steps: 0,
-    }));
-    let (tx, rx) = mpsc::channel();
-    let s = Arc::clone(&shared);
-
-    let mut child = child;
-    let stdout = child.stdout.take()?;
-    // The child outlives a naive stop: the reader blocks in `lines()`, and
-    // zealot prints roughly every four seconds, so a stop checked between
-    // lines arrives late — or never, if the app is closing. A watcher blocked
-    // on the channel kills it immediately instead, which is what keeps a
-    // window close from leaking a GPU trainer.
-    let child = Arc::new(Mutex::new(child));
-    let watched = Arc::clone(&child);
-    thread::spawn(move || {
-        // Both a Stop and a hung-up sender (the Handle dropped) mean the same
-        // thing here: nobody is left who wants this run.
-        let _ = rx.recv();
-        if let Ok(mut c) = watched.lock() {
-            let _ = c.kill();
-        }
-    });
-
-    thread::spawn(move || {
-        let mut pending = Row::default();
-        let mut cumulative: u64 = 0;
-
-        // No stop check here: the watcher kills the child, which closes this
-        // pipe and ends the loop. One owner of that decision, not two.
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-
-            // A run emits the table row first, then the `[rb]` breakdown for
-            // the same iteration. Hold the row until its terms arrive so the
-            // UI never sees a sample with half its fields.
-            if let Some(row) = parse_row(&line) {
-                pending = row;
-            } else if let Some(rb) = parse_rb(&line) {
-                cumulative += rb.samples;
-                let sample = Sample {
-                    step: cumulative,
-                    reward: pending.reward,
-                    terms: TERMS.iter().map(|t| rb.term(t)).collect(),
-                    fall_rate: if rb.samples > 0 {
-                        rb.fell as f32 / rb.samples as f32
-                    } else {
-                        0.0
-                    },
-                    steps_per_sec: if pending.secs > 0.0 {
-                        rb.samples as f64 / pending.secs
-                    } else {
-                        0.0
-                    },
-                    // zealot reports terminations rather than episode length;
-                    // leaving this zero is honest, where a guess would not be.
-                    episode_len: 0.0,
-                    leans: Vec::new(),
-                };
-                if let Ok(mut g) = s.lock() {
-                    g.samples.push(sample);
-                    g.total_steps = cumulative;
-                    if g.samples.len() > 600 {
-                        g.samples.drain(0..100);
-                    }
-                }
-            }
-        }
-
-        // Reap it whether it ended on its own or the watcher killed it, so a
-        // finished run leaves no zombie behind.
-        if let Ok(mut c) = child.lock() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-        if let Ok(mut g) = s.lock() {
-            g.running = false;
-        }
-    });
-
-    Some(Handle::external(shared, tx))
+    spawn_curriculum(vec![("baseline".into(), Vec::new())], envs, iters, 1, ckpt)
 }
 
 /// Attach to an already-running (or finished) trainer by tailing its log,
@@ -778,6 +795,7 @@ pub fn attach_log(path: &str) -> Option<Handle> {
         running: true,
         envs: 0,
         total_steps: 0,
+        ..Shared::default()
     }));
     let (tx, rx) = mpsc::channel();
     let s = Arc::clone(&shared);
@@ -828,6 +846,7 @@ pub fn attach_log(path: &str) -> Option<Handle> {
                 } else if let Some(rb) = parse_rb(line) {
                     cumulative += rb.samples;
                     let sample = Sample {
+                        fall_rate_unmeasured: rb.samples == 0,
                         step: cumulative,
                         reward: pending.reward,
                         terms: TERMS.iter().map(|t| rb.term(t)).collect(),
@@ -923,7 +942,11 @@ fn parse_rb(line: &str) -> Option<Rb> {
             _ => pairs.push((k.to_string(), v.parse().unwrap_or(f32::NAN))),
         }
     }
-    Some(Rb { pairs, samples, fell })
+    Some(Rb {
+        pairs,
+        samples,
+        fell,
+    })
 }
 
 #[cfg(test)]
@@ -949,9 +972,11 @@ mod tests {
 
     #[test]
     fn the_breakdown_yields_terms_and_counts() {
-        let rb = parse_rb("[rb] iter 3 track_lin_vel=0.51 upright=0.90 \
-                           action_rate=-0.01 torque_leg=-0.04 term_fell=12 samples=6144")
-            .expect("rb line should parse");
+        let rb = parse_rb(
+            "[rb] iter 3 track_lin_vel=0.51 upright=0.90 \
+                           action_rate=-0.01 torque_leg=-0.04 term_fell=12 samples=6144",
+        )
+        .expect("rb line should parse");
         assert_eq!(rb.samples, 6144);
         assert_eq!(rb.fell, 12);
         assert!((rb.term("upright") - 0.90).abs() < 1e-6);
@@ -1031,15 +1056,19 @@ mod tests {
     fn a_rollout_that_resets_every_step_is_collapsed() {
         let healthy = parse_rollout(ROLLOUT).expect("rollout");
         assert!(healthy.resets.is_empty());
-        assert!(!healthy.collapsed(), "a clean rollout must not read as collapsed");
+        assert!(
+            !healthy.collapsed(),
+            "a clean rollout must not read as collapsed"
+        );
 
-        let every_step = parse_rollout(&ROLLOUT.replace(
-            r#""resets": [],"#,
-            r#""resets": [0, 1, 2],"#,
-        ))
-        .expect("rollout");
+        let every_step =
+            parse_rollout(&ROLLOUT.replace(r#""resets": [],"#, r#""resets": [0, 1, 2],"#))
+                .expect("rollout");
         assert_eq!(every_step.resets.len(), 3);
-        assert!(every_step.collapsed(), "reset on every frame must read as collapsed");
+        assert!(
+            every_step.collapsed(),
+            "reset on every frame must read as collapsed"
+        );
     }
 
     #[test]
@@ -1071,8 +1100,8 @@ mod tests {
 
     #[test]
     fn a_non_finite_angle_does_not_reach_the_viewer() {
-        let r = parse_rollout(&ROLLOUT.replace("-0.02000,0.00400", "NaN,0.00400"))
-            .expect("rollout");
+        let r =
+            parse_rollout(&ROLLOUT.replace("-0.02000,0.00400", "NaN,0.00400")).expect("rollout");
         let urdf = vec!["left_hip_pitch_joint".to_string()];
         assert!(r.pose(2, &urdf).iter().all(|a| a.is_finite()));
     }
@@ -1129,7 +1158,11 @@ mod tests {
     fn achieved_velocity_comes_from_the_base_track() {
         let r = parse_rollout(ROLLOUT).expect("rollout");
         // 11.35613 - 11.34413 = 0.012 m over two 0.02 s steps = 0.3 m/s.
-        assert!((r.achieved_vx() - 0.3).abs() < 1e-3, "got {}", r.achieved_vx());
+        assert!(
+            (r.achieved_vx() - 0.3).abs() < 1e-3,
+            "got {}",
+            r.achieved_vx()
+        );
     }
 
     #[test]
@@ -1159,8 +1192,9 @@ mod tests {
     /// that run produced.
     #[test]
     fn real_zealot_output_parses() {
-        let row = parse_row("   0   1.00        NaN     6144     0.842    1.00e-3      NaN     4.2")
-            .expect("real table row should parse");
+        let row =
+            parse_row("   0   1.00        NaN     6144     0.842    1.00e-3      NaN     4.2")
+                .expect("real table row should parse");
         assert!(row.reward.is_nan());
         assert!((row.secs - 4.2).abs() < 1e-6);
 
@@ -1179,5 +1213,53 @@ mod tests {
         // Every env terminating is what a fall rate of 1.0 means, and the UI
         // should be told that rather than shown a tidy zero.
         assert!((rb.fell as f32 / rb.samples as f32 - 1.0).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod continuation_integration {
+    use super::*;
+    #[test]
+    #[ignore = "requires installed G1 trainer and NEXUS_VERIFY_G1_SOURCE checkpoint"]
+    fn g1_continuation_obeys_total_budget() {
+        let source = std::env::var("NEXUS_VERIFY_G1_SOURCE").expect("Set the source checkpoint");
+        let root = std::env::temp_dir().join(format!("nexus-g1-budget-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let checkpoint = root.join("policy.safetensors");
+        let original = std::fs::read(&source).unwrap();
+        std::fs::copy(&source, &checkpoint).unwrap();
+        let h = spawn_curriculum_budgeted(
+            vec![("first".into(), vec![]), ("second".into(), vec![])],
+            256,
+            400,
+            6,
+            &checkpoint.to_string_lossy(),
+            Some(2),
+        )
+        .expect("G1 trainer installed");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            let g = h.shared.lock().unwrap();
+            if !g.running {
+                assert!(g.error.is_none(), "{:?}", g.error);
+                break;
+            }
+            drop(g);
+            if std::time::Instant::now() > deadline {
+                h.stop();
+                panic!("G1 verification timed out; files: {}", root.display());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(
+            h.shared.lock().unwrap().samples.last().unwrap().step,
+            2 * 256 * 24
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+        assert_ne!(std::fs::read(&checkpoint).unwrap(), original);
+        eprintln!(
+            "Verified G1 continuation: 2 iterations / 12288 steps / {}",
+            checkpoint.display()
+        );
     }
 }

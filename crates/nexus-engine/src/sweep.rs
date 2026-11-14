@@ -48,6 +48,7 @@ pub struct Surface {
     pub done: usize,
     pub total: usize,
     pub running: bool,
+    pub stop_requested: bool,
     pub label: String,
     /// What the axes actually varied. Empty means the built-in cart-pole
     /// sweep, whose axes the screen names itself; a zealot sweep varies
@@ -59,9 +60,24 @@ pub struct Surface {
     pub collapsed: usize,
 }
 
+fn stopped(surface: &Arc<Mutex<Surface>>) -> bool {
+    let Ok(mut s) = surface.lock() else {
+        return true;
+    };
+    if s.stop_requested {
+        s.running = false;
+        true
+    } else {
+        false
+    }
+}
+
 impl Surface {
     pub fn cell(&self, row: usize, col: usize) -> Option<f32> {
-        self.cells.get(row * COLS + col).copied().filter(|v| *v >= 0.0)
+        self.cells
+            .get(row * COLS + col)
+            .copied()
+            .filter(|v| *v >= 0.0)
     }
 
     /// Share of evaluated cells where the policy did the task acceptably.
@@ -87,8 +103,14 @@ pub fn axis_mass(row: usize) -> f32 {
 /// Start a sweep over the newest checkpoint of `run`. Returns `None` when there
 /// is nothing to sweep yet, rather than reporting an empty surface as a result.
 pub fn spawn(run: &str) -> Option<Arc<Mutex<Surface>>> {
-    let (path, manifest) = ckpt::list(run).into_iter().next()?;
-    let (weights, _) = ckpt::read(&path).ok()?;
+    let (path, _) = ckpt::list(run).into_iter().next()?;
+    spawn_checkpoint(&path)
+}
+pub fn spawn_checkpoint(path: &std::path::Path) -> Option<Arc<Mutex<Surface>>> {
+    let (weights, manifest) = ckpt::read(path).ok()?;
+    if manifest.n_obs != N_OBS || manifest.n_act != N_ACT {
+        return None;
+    }
 
     let surface = Arc::new(Mutex::new(Surface {
         cells: vec![-1.0; ROWS * COLS],
@@ -102,7 +124,11 @@ pub fn spawn(run: &str) -> Option<Arc<Mutex<Surface>>> {
     let out = Arc::clone(&surface);
     thread::spawn(move || {
         let mut rng = Rng::new(manifest.seed ^ 0x5177EE);
-        let hidden = if manifest.hidden == 0 { 64 } else { manifest.hidden };
+        let hidden = if manifest.hidden == 0 {
+            64
+        } else {
+            manifest.hidden
+        };
         let mut ppo = Ppo::new(N_OBS, N_ACT, hidden, Config::default(), &mut rng);
         if !ppo.load_weights(&weights) {
             if let Ok(mut s) = out.lock() {
@@ -117,6 +143,9 @@ pub fn spawn(run: &str) -> Option<Arc<Mutex<Surface>>> {
 
         for row in 0..ROWS {
             for col in 0..COLS {
+                if stopped(&out) {
+                    return;
+                }
                 let p = Params {
                     mass_scale: axis_mass(row),
                     force_scale: axis_force(col),
@@ -127,6 +156,9 @@ pub fn spawn(run: &str) -> Option<Arc<Mutex<Surface>>> {
 
                 let mut score = 0.0_f32;
                 for ep in 0..EPISODES {
+                    if stopped(&out) {
+                        return;
+                    }
                     // A spread of commands per cell, so a cell measures the
                     // task rather than one lucky target.
                     let cmd = -0.7 + 1.4 * (ep as f32 / (EPISODES - 1) as f32);
@@ -152,7 +184,11 @@ pub fn spawn(run: &str) -> Option<Arc<Mutex<Surface>>> {
                     }
                     // A fall scores zero however well it tracked beforehand:
                     // falling over is not a partial success.
-                    score += if fell { 0.0 } else { track / steps.max(1) as f32 };
+                    score += if fell {
+                        0.0
+                    } else {
+                        track / steps.max(1) as f32
+                    };
                 }
 
                 if let Ok(mut s) = out.lock() {
@@ -235,12 +271,16 @@ pub mod zealot_sweep {
                 KP_RANGE.0, KP_RANGE.1, FRICTION_RANGE.0, FRICTION_RANGE.1
             ),
             collapsed: 0,
+            stop_requested: false,
         }));
 
         let out = Arc::clone(&surface);
         thread::spawn(move || {
             for row in 0..ROWS {
                 for col in 0..COLS {
+                    if stopped(&out) {
+                        return;
+                    }
                     let knobs = [
                         ("BIPED_KP_SCALE", format!("{:.4}", axis_kp(col))),
                         ("BIPED_FRICTION", format!("{:.4}", axis_friction(row))),
@@ -248,7 +288,11 @@ pub mod zealot_sweep {
                         // on top would blur what each cell measures.
                         ("BIPED_SPAWN_DR", "0".to_string()),
                     ];
-                    let cmd = Drive { vx: COMMAND_VX, seconds: SECONDS, ..Drive::default() };
+                    let cmd = Drive {
+                        vx: COMMAND_VX,
+                        seconds: SECONDS,
+                        ..Drive::default()
+                    };
                     let r = zealot::drive(&ckpt, cmd, &knobs);
                     // A collapsed rollout is unmeasured, not zero. zealot
                     // resets on termination before recording the next frame,
@@ -310,6 +354,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cancelling_a_real_sweep_stops_worker_and_keeps_unmeasured_cells() {
+        let run = format!(
+            "sweep-cancel-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let mut rng = Rng::new(1);
+        let ppo = Ppo::new(N_OBS, N_ACT, 64, Config::default(), &mut rng);
+        let path = ckpt::write(
+            &run,
+            "test",
+            &ppo.to_weights(),
+            &ckpt::Manifest {
+                run: run.clone(),
+                n_obs: N_OBS,
+                n_act: N_ACT,
+                hidden: 64,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let surface = spawn_checkpoint(&path).unwrap();
+        surface.lock().unwrap().stop_requested = true;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while surface.lock().unwrap().running && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let s = surface.lock().unwrap();
+        assert!(!s.running);
+        assert!(s.done < s.total);
+        assert!(s.cells.iter().any(|c| *c < 0.0));
+        std::fs::remove_dir_all(ckpt::run_dir(&run)).unwrap();
+    }
+
+    #[test]
     fn the_axes_span_their_declared_ranges() {
         assert!((axis_force(0) - FORCE_RANGE.0).abs() < 1e-6);
         assert!((axis_force(COLS - 1) - FORCE_RANGE.1).abs() < 1e-6);
@@ -333,7 +415,10 @@ mod tests {
         cells[0] = 1.0;
         cells[1] = 0.9;
         cells[2] = 0.2;
-        let s = Surface { cells, ..Default::default() };
+        let s = Surface {
+            cells,
+            ..Default::default()
+        };
         assert!((s.pass_fraction() - 2.0 / 3.0).abs() < 1e-6);
     }
 }

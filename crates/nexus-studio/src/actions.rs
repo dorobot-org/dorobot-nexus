@@ -11,6 +11,53 @@ fn f2(v: f64) -> String {
 }
 
 impl Store {
+    /// An explicit library ID is authoritative. Legacy model names must be unique.
+    pub fn snapshot_robot(&self, snapshot: &Snapshot) -> Option<String> {
+        if let Some(id) = &snapshot.robot_id {
+            return self
+                .robots
+                .iter()
+                .find(|r| &r.id == id)
+                .map(|r| r.id.clone());
+        }
+        let mut matches = self
+            .robots
+            .iter()
+            .filter(|r| Some(r.model_name()) == snapshot.robot.as_deref());
+        let first = matches.next()?;
+        matches.next().is_none().then(|| first.id.clone())
+    }
+    pub fn sync_run_metrics(&mut self) {
+        if self.demo {
+            return;
+        }
+        let samples = self
+            .sel
+            .run
+            .as_ref()
+            .and_then(|id| self.run(id))
+            .map(|r| r.metrics.clone())
+            .unwrap_or_default();
+        self.live.hist_full = samples.iter().map(|s| s.reward).collect();
+        self.live.hist = self
+            .live
+            .hist_full
+            .iter()
+            .rev()
+            .take(120)
+            .copied()
+            .collect::<Vec<_>>();
+        self.live.hist.reverse();
+        self.live.now_hist.clear();
+        self.live.reward = samples.last().map(|s| s.reward).unwrap_or(0.0);
+        self.live.falls = samples.last().map(|s| s.fall_rate * 100.0).unwrap_or(0.0);
+        self.live.falls_unmeasured = samples
+            .last()
+            .map(|s| s.fall_rate_unmeasured)
+            .unwrap_or(true);
+        self.live.sps = samples.last().map(|s| s.steps_per_sec).unwrap_or(0.0);
+    }
+
     pub fn tr_pub(&self, k: &str) -> String {
         crate::i18n::tr(self.lang, k).to_string()
     }
@@ -24,6 +71,13 @@ impl Store {
     // ================================================================ scenes
 
     pub fn sel_scene(&mut self, id: &str) {
+        if self.dirty && self.sel.scene.as_deref() != Some(id) {
+            self.toast("Save or revert the scene draft before switching scenes.".into());
+            return;
+        }
+        if self.sel.scene.as_deref() == Some(id) {
+            return;
+        }
         self.draft = None;
         self.dirty = false;
         self.sel.scene = Some(id.into());
@@ -33,23 +87,35 @@ impl Store {
     }
 
     pub fn new_scene(&mut self) {
+        if self.dirty {
+            self.toast("Save or revert the current draft first.".into());
+            return;
+        }
         let id = self.nid("s");
         let name = format!("scene-{}", self.uid - 100);
         let s = Scene::base(&id, &name);
+        self.draft = Some(s.clone());
         self.scenes.push(s);
         self.sel.scene = Some(id);
-        self.draft = None;
-        self.dirty = false;
+        self.dirty = true;
         let m = self.tr("New scene from baseline — Draft until saved");
         self.toast(m);
     }
 
     pub fn dup_scene(&mut self) {
-        let Some(src) = self.sel.scene.clone().and_then(|i| self.scene(&i).cloned()) else { return };
+        if self.dirty {
+            self.toast("Save or revert the current draft first.".into());
+            return;
+        }
+        let Some(src) = self.sel.scene.clone().and_then(|i| self.scene(&i).cloned()) else {
+            return;
+        };
         let id = self.nid("s");
         let mut s = src.clone();
         s.id = id.clone();
-        s.name = format!("{}-2", src.name);
+        s.name = self.unique_scene_name(&src.name);
+        self.draft = Some(s.clone());
+        self.dirty = true;
         let nm = s.name.clone();
         self.scenes.push(s);
         self.sel.scene = Some(id);
@@ -66,12 +132,20 @@ impl Store {
     }
 
     pub fn del_scene_yes(&mut self) {
-        let Some(id) = self.sel.scene.clone() else { return };
-        let Some(idx) = self.scenes.iter().position(|s| s.id == id) else { return };
-        let sc = self.scenes.remove(idx);
-        if crate::nexus::is_disk_scene(&sc.id) {
-            let _ = crate::nexus::delete_scene(&sc);
+        let Some(id) = self.sel.scene.clone() else {
+            return;
+        };
+        let Some(idx) = self.scenes.iter().position(|s| s.id == id) else {
+            return;
+        };
+        let sc = self.scenes[idx].clone();
+        if !self.demo {
+            if let Err(e) = crate::nexus::delete_scene(&sc) {
+                self.toast(format!("Could not delete scene: {e}"));
+                return;
+            }
         }
+        self.scenes.remove(idx);
         let was_in: Vec<String> = self.sets_of(&id).iter().map(|s| s.name.clone()).collect();
         self.sel.scene = self.scenes.first().map(|s| s.id.clone());
         self.draft = None;
@@ -80,13 +154,18 @@ impl Store {
         let msg = if was_in.is_empty() {
             self.trf("Deleted {0}", &[&sc.name])
         } else {
-            self.trf("Deleted {0} — {1} shows a broken slot", &[&sc.name, &was_in.join(", ")])
+            self.trf(
+                "Deleted {0} — {1} shows a broken slot",
+                &[&sc.name, &was_in.join(", ")],
+            )
         };
         self.toast_undo(msg, UndoAction::RestoreScene { scene: sc, idx });
     }
 
     pub fn addto_set_yes(&mut self, set_id: &str) {
-        let Some(scene) = self.sel.scene.clone() else { return };
+        let Some(scene) = self.sel.scene.clone() else {
+            return;
+        };
         if let Some(st) = self.sets.iter_mut().find(|s| s.id == set_id) {
             if !st.members.contains(&scene) {
                 st.members.push(scene);
@@ -99,46 +178,69 @@ impl Store {
         }
     }
 
+    fn unique_scene_name(&self, base: &str) -> String {
+        let mut name = base.to_string();
+        let mut suffix = 2;
+        while self.scenes.iter().any(|s| {
+            crate::nexus::from_ui(s).path() == crate::nexus::from_ui(&Scene::base("", &name)).path()
+        }) || crate::nexus::from_ui(&Scene::base("", &name))
+            .path()
+            .exists()
+        {
+            name = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        name
+    }
+
     pub fn save(&mut self) {
-        let Some(d) = self.draft.take() else { return };
-        let nm = d.name.clone();
-        if let Some(id) = self.sel.scene.clone() {
-            if let Some(s) = self.scene_mut(&id) {
-                let keep_id = s.id.clone();
-                *s = d;
-                s.id = keep_id;
+        let Some(mut draft) = self.draft.clone() else {
+            return;
+        };
+        let Some(id) = self.sel.scene.clone() else {
+            return;
+        };
+        if self.scene(&id).is_none() {
+            return;
+        }
+        draft.id = id.clone();
+        if !self.demo {
+            if let Err(e) = crate::nexus::save_scene(&draft) {
+                self.toast(format!("Could not save scene; draft retained: {e}"));
+                return;
             }
         }
+        let name = draft.name.clone();
+        *self.scene_mut(&id).unwrap() = draft;
+        self.draft = None;
         self.dirty = false;
-        // Write through to the real dorobot-nexus scene library.
-        let persisted = self
-            .sel
-            .scene
-            .clone()
-            .and_then(|id| self.scene(&id).cloned())
-            .map(|sc| crate::nexus::save_scene(&sc));
-        let m = match persisted {
-            Some(Ok(p)) => self.trf("Saved {0}", &[&format!("{nm} → {}", p.display())]),
-            Some(Err(e)) => self.trf("Saved {0}", &[&format!("{nm} (disk write failed: {e})")]),
-            None => self.trf("Saved {0}", &[&nm]),
-        };
-        self.toast(m);
+        self.toast(format!("Saved {name}"));
     }
 
     pub fn saveas(&mut self) {
         let sc = self.cur_scene();
-        let terrain = if sc.terrain.is_empty() { "flat" } else { &sc.terrain };
+        let terrain = if sc.terrain.is_empty() {
+            "flat"
+        } else {
+            &sc.terrain
+        };
         let name = format!(
             "{terrain}-f{}-kp{}{}",
             f2(sc.friction),
             f2(sc.kp),
             if sc.push > 0.0 { "-push" } else { "" }
         );
+        let name = self.unique_scene_name(&name);
         let id = self.nid("s");
         let mut s = sc;
         s.id = id.clone();
         s.name = name.clone();
-        let _ = crate::nexus::save_scene(&s);
+        if !self.demo {
+            if let Err(e) = crate::nexus::save_scene(&s) {
+                self.toast(format!("Could not save scene; draft retained: {e}"));
+                return;
+            }
+        }
         self.scenes.push(s);
         self.sel.scene = Some(id);
         self.draft = None;
@@ -163,6 +265,10 @@ impl Store {
     }
 
     pub fn edit_field(&mut self, f: &str, v: f64) {
+        if !v.is_finite() {
+            self.toast("Scene values must be finite.".into());
+            return;
+        }
         self.mark_dirty();
         if let Some(d) = &mut self.draft {
             match f {
@@ -202,10 +308,19 @@ impl Store {
     }
 
     pub fn resim(&mut self) {
+        if !self.demo {
+            self.live.frame = 0;
+            self.toast("Scene updated. A policy preview will run when a compatible checkpoint is selected.".into());
+            return;
+        }
         let sc = self.cur_scene();
         self.live.frame = 0;
         self.live.frames = (sc.dur * 50.0).round() as u32;
-        let terrain = if sc.terrain.is_empty() { self.tr("flat") } else { self.tr(&sc.terrain) };
+        let terrain = if sc.terrain.is_empty() {
+            self.tr("flat")
+        } else {
+            self.tr(&sc.terrain)
+        };
         let frames = self.live.frames.to_string();
         let m = self.trf("Re-simulated on {0} — {1} frames", &[&terrain, &frames]);
         self.toast(m);
@@ -235,6 +350,8 @@ impl Store {
         let n = self.recordings.len() + 1;
         let id = self.nid("rec");
         let rec = Recording {
+            robot: None,
+            run: None,
             id,
             name: format!("{}-{:03}", sc.name, n),
             scene: sc.name.clone(),
@@ -252,8 +369,13 @@ impl Store {
     // ============================================================== composer
 
     pub fn comp_add(&mut self) {
-        let (Some(set_id), Some(scene_id)) = (self.sel.set.clone(), self.sel.scene.clone()) else { return };
-        let scene_name = self.scene(&scene_id).map(|s| s.name.clone()).unwrap_or_default();
+        let (Some(set_id), Some(scene_id)) = (self.sel.set.clone(), self.sel.scene.clone()) else {
+            return;
+        };
+        let scene_name = self
+            .scene(&scene_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
         if let Some(st) = self.sets.iter_mut().find(|s| s.id == set_id) {
             if st.members.contains(&scene_id) {
                 let nm = st.name.clone();
@@ -269,7 +391,9 @@ impl Store {
     }
 
     pub fn comp_rm(&mut self, i: usize) {
-        let Some(set_id) = self.sel.set.clone() else { return };
+        let Some(set_id) = self.sel.set.clone() else {
+            return;
+        };
         if let Some(st) = self.sets.iter_mut().find(|s| s.id == set_id) {
             if i >= st.members.len() {
                 return;
@@ -277,12 +401,21 @@ impl Store {
             let gone = st.members.remove(i);
             let nm = st.name.clone();
             let m = self.trf("Removed from {0} — the scene itself survives", &[&nm]);
-            self.toast_undo(m, UndoAction::RestoreMember { set: set_id, idx: i, member: gone });
+            self.toast_undo(
+                m,
+                UndoAction::RestoreMember {
+                    set: set_id,
+                    idx: i,
+                    member: gone,
+                },
+            );
         }
     }
 
     pub fn comp_move(&mut self, i: usize, right: bool) {
-        let Some(set_id) = self.sel.set.clone() else { return };
+        let Some(set_id) = self.sel.set.clone() else {
+            return;
+        };
         if let Some(st) = self.sets.iter_mut().find(|s| s.id == set_id) {
             let j = if right { i + 1 } else { i.wrapping_sub(1) };
             if i < st.members.len() && j < st.members.len() {
@@ -292,9 +425,15 @@ impl Store {
     }
 
     pub fn set_rename_yes(&mut self, name: &str) {
-        let Some(set_id) = self.sel.set.clone() else { return };
+        let Some(set_id) = self.sel.set.clone() else {
+            return;
+        };
         if let Some(st) = self.sets.iter_mut().find(|s| s.id == set_id) {
-            st.name = if name.is_empty() { "unnamed".into() } else { name.into() };
+            st.name = if name.is_empty() {
+                "unnamed".into()
+            } else {
+                name.into()
+            };
         }
         self.modal = AppModal::None;
         let m = self.tr("Renamed");
@@ -302,10 +441,18 @@ impl Store {
     }
 
     pub fn set_dup(&mut self) {
-        let Some(set_id) = self.sel.set.clone() else { return };
-        let Some(st) = self.set(&set_id).cloned() else { return };
+        let Some(set_id) = self.sel.set.clone() else {
+            return;
+        };
+        let Some(st) = self.set(&set_id).cloned() else {
+            return;
+        };
         let id = self.nid("t");
-        self.sets.push(SceneSet { id: id.clone(), name: format!("{} copy", st.name), members: st.members });
+        self.sets.push(SceneSet {
+            id: id.clone(),
+            name: format!("{} copy", st.name),
+            members: st.members,
+        });
         self.sel.set = Some(id);
         let m = self.tr("Duplicated set — same scenes, new ordering to edit");
         self.toast(m);
@@ -315,19 +462,23 @@ impl Store {
 
     pub fn launch(&mut self, name: &str, warm: &str) {
         self.modal = AppModal::None;
-        for r in &mut self.runs {
-            if r.state == RunState::Running {
-                r.state = RunState::Stopped;
-            }
+        let Some(set_id) = self.sel.set.clone() else {
+            return;
+        };
+        let Some(st) = self.set(&set_id).cloned() else {
+            return;
+        };
+        if st.members.is_empty() || st.members.iter().any(|id| self.scene(id).is_none()) {
+            self.toast("Training requires a nonempty scene set with no broken slots.".into());
+            return;
         }
-        let Some(set_id) = self.sel.set.clone() else { return };
-        let Some(st) = self.set(&set_id).cloned() else { return };
         let name = if name.is_empty() { "run" } else { name };
         let cfg: Vec<CfgScene> = st
             .members
             .iter()
             .filter_map(|id| self.scene(id))
             .map(|sc| CfgScene {
+                full: Some(sc.clone()),
                 name: sc.name.clone(),
                 stance: sc.stance,
                 terrain: sc.terrain.clone(),
@@ -340,35 +491,67 @@ impl Store {
         let stages: Vec<String> = st
             .members
             .iter()
-            .map(|id| self.scene(id).map(|s| s.name.clone()).unwrap_or_else(|| "?".into()))
+            .map(|id| {
+                self.scene(id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| "?".into())
+            })
             .collect();
         let id = self.nid("run");
-        self.runs.insert(0, Run {
-            id: id.clone(),
-            name: name.into(),
-            set: st.name.clone(),
-            state: RunState::Running,
-            archived: false,
-            coll: false,
-            steps: 0.0,
-            best: Some(-0.42),
-            stage: 0,
-            stages,
-            round: 1,
-            iter: 0,
-            iters_per: 400,
-            snapshot: Snapshot { scenes: st.members.len(), seed: "0xC0FFEE".into(), warm: Some(warm.into()), cfg },
-            ckpts: vec![],
-            diagnosis: None,
-        });
+        self.runs.insert(
+            0,
+            Run {
+                job: None,
+                metrics: vec![],
+                id: id.clone(),
+                name: name.into(),
+                set: st.name.clone(),
+                state: RunState::Running,
+                archived: false,
+                coll: false,
+                steps: 0.0,
+                best: None,
+                stage: 0,
+                stages,
+                round: 1,
+                iter: 0,
+                iters_per: 400,
+                snapshot: Snapshot {
+                    additional_iterations: None,
+                    robot_id: self.sel.robot.clone(),
+                    backend: None,
+                    training_profile: None,
+                    robot: self
+                        .sel
+                        .robot
+                        .as_ref()
+                        .and_then(|id| self.robots.iter().find(|r| &r.id == id))
+                        .map(|r| r.model_name().to_string()),
+                    scenes: st.members.len(),
+                    seed: "0xC0FFEE".into(),
+                    warm: Some(warm.into()),
+                    cfg,
+                },
+                ckpts: vec![],
+                diagnosis: None,
+            },
+        );
         self.sel.run = Some(id);
-        let msg = format!("{} · {}", self.trf("Launched {0} — snapshot embedded", &[name]), self.tr(warm));
+        self.sel.ck = None;
+        self.sel.ck_run = None;
+        let msg = format!(
+            "{} · {}",
+            self.trf("Launched {0} — snapshot embedded", &[name]),
+            self.tr(warm)
+        );
         self.toast(msg);
         self.mode = Mode::Train;
     }
 
     pub fn pause(&mut self) {
-        let Some(id) = self.sel.run.clone() else { return };
+        let Some(id) = self.sel.run.clone() else {
+            return;
+        };
         if let Some(r) = self.run_mut(&id) {
             r.state = RunState::Paused;
         }
@@ -376,7 +559,9 @@ impl Store {
         self.toast(m);
     }
     pub fn resume(&mut self) {
-        let Some(id) = self.sel.run.clone() else { return };
+        let Some(id) = self.sel.run.clone() else {
+            return;
+        };
         if let Some(r) = self.run_mut(&id) {
             r.state = RunState::Running;
         }
@@ -384,7 +569,9 @@ impl Store {
         self.toast(m);
     }
     pub fn stop(&mut self) {
-        let Some(id) = self.sel.run.clone() else { return };
+        let Some(id) = self.sel.run.clone() else {
+            return;
+        };
         if let Some(r) = self.run_mut(&id) {
             r.state = RunState::Stopped;
         }
@@ -395,7 +582,9 @@ impl Store {
     // =========================================================== checkpoints
 
     pub fn ck_promote_yes(&mut self, ck_id: &str, pname: &str) {
-        let Some(run_id) = self.sel.run.clone() else { return };
+        let Some(run_id) = self.sel.run.clone() else {
+            return;
+        };
         let pname = if pname.is_empty() { "promoted" } else { pname };
         if let Some(r) = self.run_mut(&run_id) {
             if let Some(c) = r.ckpts.iter_mut().find(|c| c.id == ck_id) {
@@ -409,8 +598,13 @@ impl Store {
     }
 
     pub fn ck_demote(&mut self, ck_id: &str) {
-        let Some(run_id) = self.sel.run.clone() else { return };
-        let run_name = self.run(&run_id).map(|r| r.name.clone()).unwrap_or_default();
+        let Some(run_id) = self.sel.run.clone() else {
+            return;
+        };
+        let run_name = self
+            .run(&run_id)
+            .map(|r| r.name.clone())
+            .unwrap_or_default();
         let mut label = None;
         if let Some(r) = self.run_mut(&run_id) {
             if let Some(c) = r.ckpts.iter_mut().find(|c| c.id == ck_id) {
@@ -433,21 +627,35 @@ impl Store {
     }
 
     pub fn ck_export(&mut self, ck_id: &str) {
-        let Some(run_id) = self.sel.run.clone() else { return };
+        let Some(run_id) = self.sel.run.clone() else {
+            return;
+        };
         if let Some(r) = self.run(&run_id) {
             if let Some(c) = r.ckpts.iter().find(|c| c.id == ck_id) {
                 let l = c.label.clone();
-                let m = self.trf("Exported {0}.onnx — export is an action, not a state", &[&l]);
+                let m = self.trf(
+                    "Exported {0}.onnx — export is an action, not a state",
+                    &[&l],
+                );
                 self.toast(m);
             }
         }
     }
 
     pub fn ck_del(&mut self, ck_id: &str) {
-        let Some(run_id) = self.sel.run.clone() else { return };
-        let run_name = self.run(&run_id).map(|r| r.name.clone()).unwrap_or_default();
-        let Some(r) = self.run_mut(&run_id) else { return };
-        let Some(i) = r.ckpts.iter().position(|c| c.id == ck_id) else { return };
+        let Some(run_id) = self.sel.run.clone() else {
+            return;
+        };
+        let run_name = self
+            .run(&run_id)
+            .map(|r| r.name.clone())
+            .unwrap_or_default();
+        let Some(r) = self.run_mut(&run_id) else {
+            return;
+        };
+        let Some(i) = r.ckpts.iter().position(|c| c.id == ck_id) else {
+            return;
+        };
         if r.ckpts[i].st == CkSt::Prom {
             let pn = r.ckpts[i].pname.clone().unwrap_or_default();
             let m = self.trf("Blocked: promoted as “{0}” — demote first", &[&pn]);
@@ -455,7 +663,8 @@ impl Store {
             return;
         }
         let ck = r.ckpts.remove(i);
-        if self.dg.ck.as_deref() == Some(&ck.label) && self.dg.ck_run.as_deref() == Some(&run_name) {
+        if self.dg.ck.as_deref() == Some(&ck.label) && self.dg.ck_run.as_deref() == Some(&run_name)
+        {
             self.dg.ck = None;
             self.dg.ck_run = None;
             self.dg.pname = None;
@@ -463,31 +672,69 @@ impl Store {
             self.dg_invalidate(Some(m));
         }
         let m = self.trf("Deleted {0}", &[&ck.label]);
-        self.toast_undo(m, UndoAction::RestoreCkpt { run: run_id, idx: i, ck });
+        self.toast_undo(
+            m,
+            UndoAction::RestoreCkpt {
+                run: run_id,
+                idx: i,
+                ck,
+            },
+        );
     }
 
-    pub fn ck_inspect(&mut self, label: &str) {
-        self.sel.ck = Some(label.into());
-        self.sel.ck_run = self.sel.run.clone().and_then(|id| self.run(&id).map(|r| r.name.clone()));
+    pub fn ck_inspect(&mut self, id: &str) {
+        let Some(run) = self.sel.run.as_ref().and_then(|r| self.run(r)).cloned() else {
+            return;
+        };
+        self.pick_ck(&run.id, id);
         self.mode = Mode::Inspect;
-        let m = self.trf("Probing {0}", &[label]);
-        self.toast(m);
     }
 
-    pub fn pick_ck(&mut self, run_name: &str, label: &str) {
-        self.sel.ck = Some(label.into());
-        self.sel.ck_run = Some(run_name.into());
-        let m = self.trf("Loaded {0} — restart pulls any newer one", &[label]);
-        self.toast(m);
+    pub fn pick_ck(&mut self, run_key: &str, id: &str) {
+        let candidates: Vec<_> = self
+            .runs
+            .iter()
+            .filter(|r| r.id == run_key || r.name == run_key)
+            .collect();
+        let run = self.runs.iter().find(|r| r.id == run_key).or_else(|| {
+            if candidates.len() == 1 {
+                Some(candidates[0])
+            } else {
+                None
+            }
+        });
+        let Some((run_id, run_name, robot, ck)) = run.and_then(|r| {
+            r.ckpts
+                .iter()
+                .find(|c| c.id == id || c.label == id)
+                .map(|c| {
+                    (
+                        r.id.clone(),
+                        r.name.clone(),
+                        self.snapshot_robot(&r.snapshot),
+                        c.id.clone(),
+                    )
+                })
+        }) else {
+            self.toast("Checkpoint is missing or its run name is ambiguous.".into());
+            return;
+        };
+        self.sel.run = Some(run_id);
+        self.sel.robot = robot;
+        self.sel.ck = Some(ck);
+        self.sel.ck_run = Some(run_name);
+        self.toast(format!("Loaded {id}"));
     }
 
     // ================================================================= sweep
 
-
     pub fn sweep_stop(&mut self) {
         self.sweep_state = SweepState::Aborted;
         let at = self.sweep_at.to_string();
-        let m = self.trf("Aborted at {0}/40 — a partial surface is evidence, so it is kept and labelled", &[&at]);
+        let m = self.trf(
+            "Aborted at {0}/40 — a partial surface is evidence, so it is kept and labelled",
+            &[&at],
+        );
         self.toast(m);
     }
 
@@ -510,17 +757,22 @@ impl Store {
         self.sweep_state = SweepState::Idle;
         self.sweep_at = 0;
         self.sel.cell = None;
-        let m = self.tr("Recipe changed — the previous surface no longer applies; re-run the sweep");
+        let m =
+            self.tr("Recipe changed — the previous surface no longer applies; re-run the sweep");
         self.toast(m);
     }
 
     pub fn cell_inspect(&mut self) {
         if self.sel.recipe != 0 {
-            let m = self.tr("This recipe's axes don't map to probe physics yet — available for PD × friction");
+            let m = self.tr(
+                "This recipe's axes don't map to probe physics yet — available for PD × friction",
+            );
             self.toast(m);
             return;
         }
-        let Some((ri, ci)) = self.sel.cell else { return };
+        let Some((ri, ci)) = self.sel.cell else {
+            return;
+        };
         let rc = &RECIPES[0];
         self.cell_phys = Some((rc.fr[ri], rc.ga[ci]));
         self.mode = Mode::Inspect;
@@ -530,11 +782,15 @@ impl Store {
 
     pub fn cell_scene(&mut self) {
         if self.sel.recipe != 0 {
-            let m = self.tr("This recipe's axes don't map to scene fields yet — available for PD × friction");
+            let m = self.tr(
+                "This recipe's axes don't map to scene fields yet — available for PD × friction",
+            );
             self.toast(m);
             return;
         }
-        let Some((ri, ci)) = self.sel.cell else { return };
+        let Some((ri, ci)) = self.sel.cell else {
+            return;
+        };
         let rc = &RECIPES[0];
         let id = self.nid("s");
         let mut s = Scene::base(&id, &format!("edge-f{}-g{}", f2(rc.fr[ri]), f2(rc.ga[ci])));
@@ -544,24 +800,33 @@ impl Store {
         s.stance = 0.60;
         let nm = s.name.clone();
         self.scenes.push(s);
-        let m = self.trf("Saved as scene “{0}” — the failing physics is now training material", &[&nm]);
+        let m = self.trf(
+            "Saved as scene “{0}” — the failing physics is now training material",
+            &[&nm],
+        );
         self.toast(m);
     }
 
     // ================================================================== runs
 
     pub fn rerun_yes(&mut self, name: &str) {
-        let Some(src_id) = self.sel.run.clone() else { return };
-        let Some(src) = self.run(&src_id).cloned() else { return };
+        let Some(src_id) = self.sel.run.clone() else {
+            return;
+        };
+        let Some(src) = self.run(&src_id).cloned() else {
+            return;
+        };
         self.modal = AppModal::None;
-        for r in &mut self.runs {
-            if r.state == RunState::Running {
-                r.state = RunState::Stopped;
-            }
-        }
         let id = self.nid("run");
         let mut r = src;
+        if !self.demo {
+            if let Err(e) = crate::nexus::restore_run_recipe(&mut r) {
+                self.toast(format!("Cannot reproduce this run: {e}"));
+                return;
+            }
+        }
         r.id = id.clone();
+        r.job = None;
         r.name = name.into();
         r.state = RunState::Running;
         r.archived = false;
@@ -571,16 +836,21 @@ impl Store {
         r.stage = 0;
         r.ckpts = vec![];
         r.diagnosis = None;
-        r.best = Some(-0.42);
+        r.best = None;
+        r.metrics.clear();
         self.runs.insert(0, r);
         self.sel.run = Some(id);
+        self.sel.ck = None;
+        self.sel.ck_run = None;
         self.mode = Mode::Train;
         let m = self.tr("Reproducing from snapshot");
         self.toast(m);
     }
 
     pub fn run_archive(&mut self) {
-        let Some(id) = self.sel.run.clone() else { return };
+        let Some(id) = self.sel.run.clone() else {
+            return;
+        };
         if let Some(r) = self.run_mut(&id) {
             r.archived = true;
         }
@@ -589,8 +859,12 @@ impl Store {
     }
 
     pub fn run_delete_yes(&mut self, keep: bool) {
-        let Some(id) = self.sel.run.clone() else { return };
-        let Some(i) = self.runs.iter().position(|r| r.id == id) else { return };
+        let Some(id) = self.sel.run.clone() else {
+            return;
+        };
+        let Some(i) = self.runs.iter().position(|r| r.id == id) else {
+            return;
+        };
         let r = self.runs.remove(i);
         let keep = keep && !r.coll;
         if self.dg.ck.is_some() && self.dg.ck_run.as_deref() == Some(&r.name) {
@@ -600,7 +874,12 @@ impl Store {
             let m = self.tr("Candidate policy's run was deleted — pick another");
             self.dg_invalidate(Some(m));
         }
-        let prom: Vec<Ckpt> = r.ckpts.iter().filter(|c| c.st == CkSt::Prom).cloned().collect();
+        let prom: Vec<Ckpt> = r
+            .ckpts
+            .iter()
+            .filter(|c| c.st == CkSt::Prom)
+            .cloned()
+            .collect();
         let mut took: Vec<String> = vec![];
         if keep && !prom.is_empty() {
             took = prom.iter().map(|c| c.id.clone()).collect();
@@ -610,6 +889,8 @@ impl Store {
                 }
             } else {
                 self.runs.push(Run {
+                    job: None,
+                    metrics: vec![],
                     id: "kept".into(),
                     name: "(kept checkpoints)".into(),
                     set: "—".into(),
@@ -623,7 +904,22 @@ impl Store {
                     round: 0,
                     iter: 0,
                     iters_per: 0,
-                    snapshot: Snapshot { scenes: 0, seed: "—".into(), warm: None, cfg: vec![] },
+                    snapshot: Snapshot {
+                        additional_iterations: None,
+                        robot_id: self.sel.robot.clone(),
+                        backend: None,
+                        training_profile: None,
+                        robot: self
+                            .sel
+                            .robot
+                            .as_ref()
+                            .and_then(|id| self.robots.iter().find(|r| &r.id == id))
+                            .map(|r| r.name.clone()),
+                        scenes: 0,
+                        seed: "—".into(),
+                        warm: None,
+                        cfg: vec![],
+                    },
                     ckpts: prom.clone(),
                     diagnosis: None,
                 });
@@ -632,32 +928,178 @@ impl Store {
         self.sel.run = self.runs.first().map(|x| x.id.clone());
         self.modal = AppModal::None;
         let m = self.trf("Deleted {0}", &[&r.name]);
-        self.toast_undo(m, UndoAction::RestoreRun { run: r, idx: i, took_from_kept: took });
+        self.toast_undo(
+            m,
+            UndoAction::RestoreRun {
+                run: r,
+                idx: i,
+                took_from_kept: took,
+            },
+        );
     }
 
     // ================================================================ robots
 
-    pub fn wiz_commit(&mut self) {
-        let id = self.nid("r");
-        let name = self
-            .wiz_file
-            .as_ref()
-            .and_then(|p| std::path::Path::new(p).file_stem().map(|s| s.to_string_lossy().to_string()))
-            .unwrap_or_else(|| "Unitree H2-plus".into());
-        self.robots.push(Robot {
-            id,
-            name,
-            links: 31,
-            joints: 30,
-            movable: 23,
-            mapped: 12,
-            meshes: 28,
-            used_by: vec![],
-            urdf: self.wiz_file.clone(),
-        });
+    pub fn robot_references(&self, id: &str) -> Vec<String> {
+        let Some(robot) = self.robots.iter().find(|r| r.id == id) else {
+            return vec![];
+        };
+        let mut references: Vec<String> = self
+            .runs
+            .iter()
+            .filter(|r| {
+                r.snapshot
+                    .robot_id
+                    .as_deref()
+                    .map(|rid| rid == id)
+                    .unwrap_or_else(|| r.snapshot.robot.as_deref() == Some(robot.model_name()))
+            })
+            .map(|r| format!("run {}", r.name))
+            .collect();
+        references.extend(
+            self.recordings
+                .iter()
+                .filter(|r| r.robot.as_deref() == Some(robot.model_name()))
+                .map(|r| format!("recording {}", r.name)),
+        );
+        if self.task_draft.as_ref().is_some_and(|d| d.robot_id == id) {
+            references.push("unsaved task draft".into());
+        }
+        for entry in &self.trash {
+            let run = match &entry.removal {
+                crate::artifacts::Removal::Run { run, .. } => Some(run),
+                _ => None,
+            };
+            if run.is_some_and(|r| {
+                r.snapshot
+                    .robot_id
+                    .as_deref()
+                    .map(|rid| rid == id)
+                    .unwrap_or_else(|| r.snapshot.robot.as_deref() == Some(robot.model_name()))
+            }) {
+                references.push(format!("recoverable run in trash: {}", entry.label));
+            }
+        }
+        references
+    }
+
+    pub fn rename_robot(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        let id = self.sel.robot.as_ref().ok_or("Select a robot")?;
+        if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
+            return Err("Use a robot name of 1–128 characters".into());
+        }
+        if self
+            .robots
+            .iter()
+            .any(|r| &r.id != id && r.name.eq_ignore_ascii_case(name))
+        {
+            return Err("Another robot already has that name".into());
+        }
+        let robot = self
+            .robots
+            .iter_mut()
+            .find(|r| &r.id == id)
+            .ok_or("Robot is missing")?;
+        if robot.model_name.is_none() {
+            robot.model_name = Some(robot.name.clone());
+        }
+        robot.name = name.into();
         self.modal = AppModal::None;
-        let m = self.tr("Committed — assets copied into the library, never referenced");
-        self.toast(m);
+        self.toast(format!(
+            "Renamed robot to {name}; existing policy contracts are preserved."
+        ));
+        Ok(())
+    }
+
+    pub fn remove_robot(&mut self) -> Result<(), String> {
+        let id = self.sel.robot.clone().ok_or("Select a robot")?;
+        let used = self.robot_references(&id);
+        if !used.is_empty() {
+            return Err(format!(
+                "Robot is still referenced by {}. Remove those references first.",
+                used.join(", ")
+            ));
+        }
+        let idx = self
+            .robots
+            .iter()
+            .position(|r| r.id == id)
+            .ok_or("Robot is missing")?;
+        let robot = self.robots.remove(idx);
+        self.sel.robot = self.robots.first().map(|r| r.id.clone());
+        self.modal = AppModal::None;
+        self.toast_undo(
+            format!("Removed {} from the robot library", robot.name),
+            UndoAction::RestoreRobot { robot, idx },
+        );
+        Ok(())
+    }
+
+    pub fn continue_run(
+        &mut self,
+        checkpoint: &str,
+        name: &str,
+        iterations: u32,
+    ) -> Result<(), String> {
+        if iterations == 0 || iterations > 1_000_000 {
+            return Err("Additional iterations must be 1–1,000,000".into());
+        }
+        let source = self
+            .sel
+            .run
+            .as_ref()
+            .and_then(|id| self.run(id))
+            .ok_or("Select a run")?;
+        let mut next = crate::nexus::continuation(source, checkpoint, iterations)?;
+        next.id = self.nid("run");
+        next.job = None;
+        next.name = if name.trim().is_empty() {
+            format!("{} continuation", next.name)
+        } else {
+            name.trim().into()
+        };
+        next.state = RunState::Running;
+        next.archived = false;
+        next.coll = false;
+        next.metrics.clear();
+        next.ckpts.clear();
+        next.steps = 0.0;
+        next.best = None;
+        next.iter = 0;
+        next.round = 1;
+        next.stage = 0;
+        next.diagnosis = None;
+        self.sel.run = Some(next.id.clone());
+        self.sel.ck = None;
+        self.sel.ck_run = None;
+        self.sel.robot = next.snapshot.robot_id.clone().or_else(|| {
+            self.robots
+                .iter()
+                .find(|r| Some(r.model_name()) == next.snapshot.robot.as_deref())
+                .map(|r| r.id.clone())
+        });
+        self.runs.insert(0, next);
+        self.mode = Mode::Train;
+        self.modal = AppModal::None;
+        Ok(())
+    }
+
+    pub fn wiz_commit(&mut self) {
+        let Some(path) = self.wiz_file.clone() else {
+            return;
+        };
+        let id = self.nid("robot");
+        let library = std::path::PathBuf::from(crate::nexus::repo_dir()).join("robots");
+        match crate::robot_import::import(std::path::Path::new(&path), &id, &library) {
+            Ok(robot) => {
+                self.robots.push(robot);
+                self.sel.robot = Some(id);
+                self.modal = AppModal::None;
+                self.toast("Robot and referenced assets imported. Configure a matching training backend before training it.".into());
+            }
+            Err(e) => self.toast(format!("Robot import failed: {e}")),
+        }
     }
 
     // ================================================================ deploy
@@ -673,7 +1115,8 @@ impl Store {
             .and_then(|r| r.ckpts.iter().find(|c| c.label == label))
             .and_then(|c| c.pname.clone())
             .unwrap_or_else(|| label.to_string());
-        let had = GATES.iter().any(|g| *self.dg.gate(*g) != Gate::NotRun) || self.dg.chk.iter().any(|c| *c);
+        let had = GATES.iter().any(|g| *self.dg.gate(*g) != Gate::NotRun)
+            || self.dg.chk.iter().any(|c| *c);
         self.dg.ck = Some(label.into());
         self.dg.ck_run = Some(run_name.into());
         self.dg.pname = Some(pname);
@@ -686,14 +1129,22 @@ impl Store {
         if self.dg.target.as_deref() == Some(id) {
             return;
         }
-        let had = GATES.iter().any(|g| *self.dg.gate(*g) != Gate::NotRun) || self.dg.chk.iter().any(|c| *c);
+        let had = GATES.iter().any(|g| *self.dg.gate(*g) != Gate::NotRun)
+            || self.dg.chk.iter().any(|c| *c);
         self.dg.target = Some(id.into());
         self.sel.dep = None;
         let msg = had.then(|| self.tr("Gates reset — they certified the previous pair"));
         self.dg_invalidate(msg);
     }
 
-    pub fn target_save(&mut self, edit: Option<String>, name: &str, ip: &str, iface: &str, cap: u32) {
+    pub fn target_save(
+        &mut self,
+        edit: Option<String>,
+        name: &str,
+        ip: &str,
+        iface: &str,
+        cap: u32,
+    ) {
         let name = if name.is_empty() { "target" } else { name };
         match edit {
             Some(id) => {
@@ -723,8 +1174,16 @@ impl Store {
                     id: id.clone(),
                     name: name.into(),
                     model: "G1-29dof".into(),
-                    iface: if iface.is_empty() { "eth0".into() } else { iface.into() },
-                    ip: if ip.is_empty() { "192.168.123.162".into() } else { ip.into() },
+                    iface: if iface.is_empty() {
+                        "eth0".into()
+                    } else {
+                        iface.into()
+                    },
+                    ip: if ip.is_empty() {
+                        "192.0.2.162".into()
+                    } else {
+                        ip.into()
+                    },
                     sdk: "unitree_sdk2 2.0".into(),
                     cap,
                     rev: 0,
@@ -741,13 +1200,25 @@ impl Store {
     }
 
     pub fn target_del(&mut self) {
-        let Some(id) = self.dg.target.clone() else { return };
-        let Some(tg) = self.target(&id).cloned() else { return };
-        if let Some(held) = self.deploys.iter().find(|d| d.tg_id == tg.id && d.state == DepState::Live) {
-            self.modal = AppModal::RemoveTargetBlocked { held: held.name.clone() };
+        let Some(id) = self.dg.target.clone() else {
+            return;
+        };
+        let Some(tg) = self.target(&id).cloned() else {
+            return;
+        };
+        if let Some(held) = self
+            .deploys
+            .iter()
+            .find(|d| d.tg_id == tg.id && d.state == DepState::Live)
+        {
+            self.modal = AppModal::RemoveTargetBlocked {
+                held: held.name.clone(),
+            };
             return;
         }
-        let Some(i) = self.targets.iter().position(|t| t.id == id) else { return };
+        let Some(i) = self.targets.iter().position(|t| t.id == id) else {
+            return;
+        };
         let tg = self.targets.remove(i);
         self.dg.target = self.targets.first().map(|t| t.id.clone());
         self.dg_invalidate(Some(self.tr("Gates reset — the target changed under them")));
@@ -756,7 +1227,13 @@ impl Store {
     }
 
     pub fn target_ping(&mut self) {
-        let Some(id) = self.dg.target.clone() else { return };
+        if !self.demo {
+            self.toast("Robot deployment requires a connected SDK2 control agent; no evidence has been measured.".into());
+            return;
+        }
+        let Some(id) = self.dg.target.clone() else {
+            return;
+        };
         if let Some(tg) = self.targets.iter_mut().find(|t| t.id == id) {
             tg.ping = Ping::Probing;
         }
@@ -775,12 +1252,19 @@ impl Store {
             }
         }
         if let Some(iface) = msg {
-            let m = self.trf("No control route over {0} — wireless is refused for control; use the wired link", &[&iface]);
+            let m = self.trf(
+                "No control route over {0} — wireless is refused for control; use the wired link",
+                &[&iface],
+            );
             self.toast(m);
         }
     }
 
     pub fn gate_start(&mut self, id: GateId) {
+        if !self.demo {
+            self.toast("Robot deployment requires a connected SDK2 control agent; no evidence has been measured.".into());
+            return;
+        }
         // Sequential enforcement.
         let allowed = match id {
             GateId::Export => self.dg.ck.is_some(),
@@ -815,7 +1299,9 @@ impl Store {
 
     pub fn gate_cancel(&mut self, id: GateId) {
         if self.dg.gate(id).running() {
-            *self.dg.gate_mut(id) = Gate::Fail { why: Line::new("cancelled by operator — re-run when ready") };
+            *self.dg.gate_mut(id) = Gate::Fail {
+                why: Line::new("cancelled by operator — re-run when ready"),
+            };
         }
     }
 
@@ -828,7 +1314,9 @@ impl Store {
         }
         let key = self.pair_key();
         for id in GATES {
-            let Gate::Running(p) = self.dg.gate(id) else { continue };
+            let Gate::Running(p) = self.dg.gate(id) else {
+                continue;
+            };
             let p = p + 1;
             let done = match id {
                 GateId::Export => p >= 8,
@@ -857,12 +1345,22 @@ impl Store {
                             (h, kb)
                         }
                     };
-                    self.dg.export = Gate::Pass { key: key.clone(), hash: h, kb };
+                    self.dg.export = Gate::Pass {
+                        key: key.clone(),
+                        hash: h,
+                        kb,
+                    };
                     let m = self.tr("Exported — hash-stable across a re-export");
                     self.toast(m);
                 }
                 GateId::Compat => {
-                    let cap = self.dg.target.as_ref().and_then(|t| self.target(t)).map(|t| t.cap).unwrap_or(70);
+                    let cap = self
+                        .dg
+                        .target
+                        .as_ref()
+                        .and_then(|t| self.target(t))
+                        .map(|t| t.cap)
+                        .unwrap_or(70);
                     if cap < 60 {
                         self.dg.compat = Gate::Fail {
                             why: Line::arg(
@@ -873,18 +1371,30 @@ impl Store {
                         let m = self.tr("Compatibility failed — see the gate for the reason");
                         self.toast(m);
                     } else {
-                        self.dg.compat = Gate::Pass { key: key.clone(), hash: String::new(), kb: 0 };
+                        self.dg.compat = Gate::Pass {
+                            key: key.clone(),
+                            hash: String::new(),
+                            kb: 0,
+                        };
                         let m = self.tr("Compatible — 5 checks, 1 accepted note");
                         self.toast(m);
                     }
                 }
                 GateId::Sim2sim => {
-                    self.dg.sim2sim = Gate::Pass { key: key.clone(), hash: String::new(), kb: 0 };
+                    self.dg.sim2sim = Gate::Pass {
+                        key: key.clone(),
+                        hash: String::new(),
+                        kb: 0,
+                    };
                     let m = self.tr("Sim-to-sim passed — survival 96%, drift 6.8%");
                     self.toast(m);
                 }
                 GateId::Dryrun => {
-                    self.dg.dryrun = Gate::Pass { key: key.clone(), hash: String::new(), kb: 0 };
+                    self.dg.dryrun = Gate::Pass {
+                        key: key.clone(),
+                        hash: String::new(),
+                        kb: 0,
+                    };
                     let m = self.tr("Dry-run clean — the robot never moved");
                     self.toast(m);
                 }
@@ -917,6 +1427,10 @@ impl Store {
     }
 
     pub fn dep_arm_yes(&mut self) {
+        if !self.demo {
+            self.toast("Robot deployment requires a connected SDK2 control agent; no evidence has been measured.".into());
+            return;
+        }
         self.modal = AppModal::None;
         let pk = self.pair_key();
         // Full revalidation: promotion, all four gates on THIS pair, checklist.
@@ -936,7 +1450,15 @@ impl Store {
             Gate::Pass { key, .. } => *key == pk,
             _ => false,
         });
-        let Some(tg) = self.dg.target.as_ref().and_then(|t| self.target(t)).cloned() else { return };
+        let Some(tg) = self
+            .dg
+            .target
+            .as_ref()
+            .and_then(|t| self.target(t))
+            .cloned()
+        else {
+            return;
+        };
         if !promoted || !gates_keyed || !self.dg.chk_ok() {
             let m = self.tr("Arm blocked — certification is no longer valid");
             self.toast(m);
@@ -947,44 +1469,70 @@ impl Store {
                 d.state = DepState::Superseded;
             }
         }
-        let Gate::Pass { hash, kb, .. } = self.dg.export.clone() else { return };
+        let Gate::Pass { hash, kb, .. } = self.dg.export.clone() else {
+            return;
+        };
         self.dep_serial += 1;
         let id = self.nid("d");
         let name = format!("dep-{:03}", self.dep_serial);
-        self.deploys.insert(0, Deploy {
-            id: id.clone(),
-            name: name.clone(),
-            ck: format!("{}|{}", self.dg.ck_run.clone().unwrap_or_default(), self.dg.ck.clone().unwrap_or_default()),
-            pname: self.dg.pname.clone().unwrap_or_default(),
-            target: tg.name.clone(),
-            tg_id: tg.id.clone(),
-            tg_rev: tg.rev,
-            hash: hash.clone(),
-            state: DepState::Live,
-            stage: 0,
-            tg_snap: Some(TgSnap { model: tg.model.clone(), ip: tg.ip.clone(), iface: tg.iface.clone(), sdk: tg.sdk.clone(), cap: tg.cap }),
-            gate_rep: vec![
-                Line::arg("onnx opset 17 · {0} KB · id {1}", vec![kb.to_string(), hash]),
-                Line::new("compat 5/5 · 1 accepted note"),
-                Line::new("sim2sim 24 eps · surv 96% · drift 6.8%"),
-                Line::new("dry-run · sat 9% · jerk p99 0.4"),
-            ],
-            chk: self.dg.chk,
-            signer: "operator".into(),
-            ts: format!("t+{:.0}s", self.clock),
-            pair: pk,
-            note: None,
-            events: vec![Line::arg("armed at {0}% torque cap", vec!["40".into()])],
-        });
+        self.deploys.insert(
+            0,
+            Deploy {
+                id: id.clone(),
+                name: name.clone(),
+                ck: format!(
+                    "{}|{}",
+                    self.dg.ck_run.clone().unwrap_or_default(),
+                    self.dg.ck.clone().unwrap_or_default()
+                ),
+                pname: self.dg.pname.clone().unwrap_or_default(),
+                target: tg.name.clone(),
+                tg_id: tg.id.clone(),
+                tg_rev: tg.rev,
+                hash: hash.clone(),
+                state: DepState::Live,
+                stage: 0,
+                tg_snap: Some(TgSnap {
+                    model: tg.model.clone(),
+                    ip: tg.ip.clone(),
+                    iface: tg.iface.clone(),
+                    sdk: tg.sdk.clone(),
+                    cap: tg.cap,
+                }),
+                gate_rep: vec![
+                    Line::arg(
+                        "onnx opset 17 · {0} KB · id {1}",
+                        vec![kb.to_string(), hash],
+                    ),
+                    Line::new("compat 5/5 · 1 accepted note"),
+                    Line::new("sim2sim 24 eps · surv 96% · drift 6.8%"),
+                    Line::new("dry-run · sat 9% · jerk p99 0.4"),
+                ],
+                chk: self.dg.chk,
+                signer: "operator".into(),
+                ts: format!("t+{:.0}s", self.clock),
+                pair: pk,
+                note: None,
+                events: vec![Line::arg("armed at {0}% torque cap", vec!["40".into()])],
+            },
+        );
         self.dg.armed = Some(id);
         self.sel.dep = None;
-        self.dg_live = DgLive { torq: 34, ..DgLive::default() };
-        let m = self.trf("Armed {0} at 40% torque — advance when it settles", &[&name]);
+        self.dg_live = DgLive {
+            torq: 34,
+            ..DgLive::default()
+        };
+        let m = self.trf(
+            "Armed {0} at 40% torque — advance when it settles",
+            &[&name],
+        );
         self.toast(m);
     }
 
     pub fn stage_adv(&mut self) {
-        let Some(id) = self.dg.armed.clone() else { return };
+        let Some(id) = self.dg.armed.clone() else {
+            return;
+        };
         if self.dg_live.dwell < 4 {
             let m = self.tr("Not settled — hold at this stage a moment longer");
             self.toast(m);
@@ -997,7 +1545,10 @@ impl Store {
             }
             d.stage += 1;
             let p = [40, 70, 100][d.stage];
-            d.events.push(Line::arg("advanced to {0}% torque cap", vec![p.to_string()]));
+            d.events.push(Line::arg(
+                "advanced to {0}% torque cap",
+                vec![p.to_string()],
+            ));
             pct = Some(p);
         }
         self.dg_live.dwell = 0;
@@ -1010,7 +1561,9 @@ impl Store {
     }
 
     pub fn dep_done(&mut self) {
-        let Some(id) = self.dg.armed.take() else { return };
+        let Some(id) = self.dg.armed.take() else {
+            return;
+        };
         let mut nm = String::new();
         if let Some(d) = self.deploys.iter_mut().find(|d| d.id == id) {
             d.events.push(Line::new("rollout complete at 100%"));
@@ -1025,14 +1578,20 @@ impl Store {
         if let Some(d) = self.deploys.iter_mut().find(|d| d.id == id) {
             let p = [40, 70, 100][d.stage].to_string();
             d.state = DepState::Aborted;
-            d.note = Some(Line::arg("software stop at {0}% — robot dropped to damping", vec![p.clone()]));
+            d.note = Some(Line::arg(
+                "software stop at {0}% — robot dropped to damping",
+                vec![p.clone()],
+            ));
             d.events.push(Line::arg("software stop at {0}%", vec![p]));
             nm = d.name.clone();
         }
         if self.dg.armed.as_deref() == Some(id) {
             self.dg.armed = None;
         }
-        let m = self.trf("E-STOP — damping. {0} recorded as aborted; gates stay valid for re-arm", &[&nm]);
+        let m = self.trf(
+            "E-STOP — damping. {0} recorded as aborted; gates stay valid for re-arm",
+            &[&nm],
+        );
         self.toast(m);
     }
 
@@ -1048,8 +1607,12 @@ impl Store {
     }
 
     pub fn dep_rollback(&mut self) {
-        let Some(cur_id) = self.dg.armed.clone() else { return };
-        let Some(cur) = self.deploy(&cur_id).cloned() else { return };
+        let Some(cur_id) = self.dg.armed.clone() else {
+            return;
+        };
+        let Some(cur) = self.deploy(&cur_id).cloned() else {
+            return;
+        };
         let Some(prev) = self
             .deploys
             .iter()
@@ -1061,37 +1624,52 @@ impl Store {
         if let Some(c) = self.deploys.iter_mut().find(|d| d.id == cur_id) {
             c.state = DepState::RolledBack;
             c.note = Some(Line::arg("rolled back to {0}", vec![prev.name.clone()]));
-            c.events.push(Line::arg("rolled back to {0}", vec![prev.name.clone()]));
+            c.events
+                .push(Line::arg("rolled back to {0}", vec![prev.name.clone()]));
         }
         self.dep_serial += 1;
         let id = self.nid("d");
-        self.deploys.insert(0, Deploy {
-            id: id.clone(),
-            name: format!("dep-{:03}", self.dep_serial),
-            ck: prev.ck.clone(),
-            pname: prev.pname.clone(),
-            target: prev.target.clone(),
-            tg_id: prev.tg_id.clone(),
-            tg_rev: prev.tg_rev,
-            hash: prev.hash.clone(),
-            state: DepState::Live,
-            stage: 2,
-            tg_snap: prev.tg_snap.clone(),
-            gate_rep: prev.gate_rep.clone(),
-            chk: prev.chk,
-            signer: prev.signer.clone(),
-            ts: prev.ts.clone(),
-            pair: prev.pair.clone(),
-            note: Some(Line::arg("re-armed by rollback of {0}", vec![cur.name.clone()])),
-            events: vec![Line::arg("re-armed by rollback of {0}", vec![cur.name.clone()])],
-        });
+        self.deploys.insert(
+            0,
+            Deploy {
+                id: id.clone(),
+                name: format!("dep-{:03}", self.dep_serial),
+                ck: prev.ck.clone(),
+                pname: prev.pname.clone(),
+                target: prev.target.clone(),
+                tg_id: prev.tg_id.clone(),
+                tg_rev: prev.tg_rev,
+                hash: prev.hash.clone(),
+                state: DepState::Live,
+                stage: 2,
+                tg_snap: prev.tg_snap.clone(),
+                gate_rep: prev.gate_rep.clone(),
+                chk: prev.chk,
+                signer: prev.signer.clone(),
+                ts: prev.ts.clone(),
+                pair: prev.pair.clone(),
+                note: Some(Line::arg(
+                    "re-armed by rollback of {0}",
+                    vec![cur.name.clone()],
+                )),
+                events: vec![Line::arg(
+                    "re-armed by rollback of {0}",
+                    vec![cur.name.clone()],
+                )],
+            },
+        );
         self.dg.armed = Some(id);
-        let m = self.trf("Rolled back — {0} re-armed at 100% from its recorded artifact", &[&prev.pname]);
+        let m = self.trf(
+            "Rolled back — {0} re-armed at 100% from its recorded artifact",
+            &[&prev.pname],
+        );
         self.toast(m);
     }
 
     pub fn dep_retire(&mut self) {
-        let Some(id) = self.sel.dep.clone() else { return };
+        let Some(id) = self.sel.dep.clone() else {
+            return;
+        };
         let mut nm = String::new();
         if let Some(d) = self.deploys.iter_mut().find(|d| d.id == id) {
             d.state = DepState::Retired;
@@ -1106,15 +1684,26 @@ impl Store {
     }
 
     pub fn dep_recert(&mut self) {
-        let Some(id) = self.sel.dep.clone() else { return };
-        let Some(d) = self.deploy(&id).cloned() else { return };
+        let Some(id) = self.sel.dep.clone() else {
+            return;
+        };
+        let Some(d) = self.deploy(&id).cloned() else {
+            return;
+        };
         let parts: Vec<&str> = d.ck.splitn(2, '|').collect();
-        let (rn, label) = (parts.first().copied().unwrap_or(""), parts.get(1).copied().unwrap_or(""));
+        let (rn, label) = (
+            parts.first().copied().unwrap_or(""),
+            parts.get(1).copied().unwrap_or(""),
+        );
         let still = self
             .runs
             .iter()
             .find(|r| r.name == rn)
-            .and_then(|r| r.ckpts.iter().find(|c| c.label == label && c.st == CkSt::Prom))
+            .and_then(|r| {
+                r.ckpts
+                    .iter()
+                    .find(|c| c.label == label && c.st == CkSt::Prom)
+            })
             .is_some();
         if !still {
             let m = self.tr("Blocked: that checkpoint is gone or no longer promoted — promote it again in Train");
@@ -1126,17 +1715,28 @@ impl Store {
         self.dg.pname = Some(d.pname.clone());
         self.dg_invalidate(None);
         self.sel.dep = None;
-        let m = self.trf("Loaded {0} as candidate — gates must re-certify", &[&d.pname]);
+        let m = self.trf(
+            "Loaded {0} as candidate — gates must re-certify",
+            &[&d.pname],
+        );
         self.toast(m);
     }
 
     pub fn ck_deploy(&mut self, ck_id: &str) {
-        let Some(run_id) = self.sel.run.clone() else { return };
+        let Some(run_id) = self.sel.run.clone() else {
+            return;
+        };
         let Some((run_name, label, pname)) = self.run(&run_id).and_then(|r| {
             r.ckpts.iter().find(|c| c.id == ck_id).map(|c| {
-                (r.name.clone(), c.label.clone(), c.pname.clone().unwrap_or_else(|| c.label.clone()))
+                (
+                    r.name.clone(),
+                    c.label.clone(),
+                    c.pname.clone().unwrap_or_else(|| c.label.clone()),
+                )
             })
-        }) else { return };
+        }) else {
+            return;
+        };
         self.dg.ck = Some(label);
         self.dg.ck_run = Some(run_name);
         self.dg.pname = Some(pname);
@@ -1152,6 +1752,12 @@ impl Store {
     pub fn apply_undo(&mut self, u: UndoAction) {
         match u {
             UndoAction::RestoreScene { scene, idx } => {
+                if !self.demo {
+                    if let Err(e) = crate::nexus::save_scene(&scene) {
+                        self.toast(format!("Could not restore scene: {e}"));
+                        return;
+                    }
+                }
                 let nm = scene.name.clone();
                 let id = scene.id.clone();
                 let idx = idx.min(self.scenes.len());
@@ -1160,11 +1766,19 @@ impl Store {
                 let m = self.trf("Restored {0}", &[&nm]);
                 self.toast(m);
             }
+            UndoAction::RestoreRobot { robot, idx } => {
+                self.sel.robot = Some(robot.id.clone());
+                self.robots.insert(idx.min(self.robots.len()), robot);
+            }
             UndoAction::RestoreRecording { rec, idx } => {
                 let idx = idx.min(self.recordings.len());
                 self.recordings.insert(idx, rec);
             }
-            UndoAction::RestoreRun { run, idx, took_from_kept } => {
+            UndoAction::RestoreRun {
+                run,
+                idx,
+                took_from_kept,
+            } => {
                 if !took_from_kept.is_empty() {
                     if let Some(k) = self.runs.iter_mut().find(|x| x.id == "kept") {
                         k.ckpts.retain(|c| !took_from_kept.contains(&c.id));
@@ -1175,6 +1789,8 @@ impl Store {
                 let idx = idx.min(self.runs.len());
                 self.runs.insert(idx, run);
                 self.sel.run = Some(id);
+                self.sel.ck = None;
+                self.sel.ck_run = None;
             }
             UndoAction::RestoreTarget { target, idx } => {
                 let id = target.id.clone();
@@ -1213,7 +1829,8 @@ impl Store {
         // from the engine's surface in `drain_real_proc`; revealing a fixture
         // on a timer here would race the measurement and win.
         let now = self.clock;
-        self.toasts.retain(|t| now - t.born < if t.undo.is_some() { 6.0 } else { 3.2 });
+        self.toasts
+            .retain(|t| now - t.born < if t.undo.is_some() { 6.0 } else { 3.2 });
     }
 
     /// Adopt a real training run (spawned or attached) as a first-class Run
@@ -1221,35 +1838,52 @@ impl Store {
     /// metric stream instead of `train_tick`'s demo motion.
     pub fn adopt_real_run(&mut self, name: &str, stage: &str, iters_per: u32) {
         for r in &mut self.runs {
-            if r.state == RunState::Running {
+            if r.job.is_none() && r.state == RunState::Running {
                 r.state = RunState::Stopped;
             }
         }
         let id = self.nid("run");
-        self.runs.insert(0, Run {
-            id: id.clone(),
-            name: name.into(),
-            set: "attached".into(),
-            state: RunState::Running,
-            archived: false,
-            coll: false,
-            steps: 0.0,
-            best: None,
-            stage: 0,
-            stages: vec![stage.into()],
-            round: 1,
-            iter: 0,
-            iters_per,
-            snapshot: Snapshot {
-                scenes: 1,
-                seed: std::env::var("BIPED_DRIVE_SEED").unwrap_or_else(|_| "-".into()),
-                warm: None,
-                cfg: vec![],
+        self.runs.insert(
+            0,
+            Run {
+                job: None,
+                metrics: vec![],
+                id: id.clone(),
+                name: name.into(),
+                set: "attached".into(),
+                state: RunState::Running,
+                archived: false,
+                coll: false,
+                steps: 0.0,
+                best: None,
+                stage: 0,
+                stages: vec![stage.into()],
+                round: 1,
+                iter: 0,
+                iters_per,
+                snapshot: Snapshot {
+                    additional_iterations: None,
+                    robot_id: self.sel.robot.clone(),
+                    backend: None,
+                    training_profile: None,
+                    robot: self
+                        .sel
+                        .robot
+                        .as_ref()
+                        .and_then(|id| self.robots.iter().find(|r| &r.id == id))
+                        .map(|r| r.model_name().to_string()),
+                    scenes: 1,
+                    seed: std::env::var("BIPED_DRIVE_SEED").unwrap_or_else(|_| "-".into()),
+                    warm: None,
+                    cfg: vec![],
+                },
+                ckpts: vec![],
+                diagnosis: None,
             },
-            ckpts: vec![],
-            diagnosis: None,
-        });
+        );
         self.sel.run = Some(id);
+        self.sel.ck = None;
+        self.sel.ck_run = None;
         self.live.real = true;
         self.live.hist.clear();
         self.live.hist_full.clear();
@@ -1260,6 +1894,9 @@ impl Store {
 
     /// ~1.1s: training progress, checkpoints + retention, rollout telemetry.
     pub fn train_tick(&mut self) {
+        if !self.demo {
+            return;
+        }
         // Rollout telemetry + health-gated dwell.
         if let Some(armed) = self.dg.armed.clone() {
             if let Some(d) = self.deploy(&armed) {
@@ -1286,7 +1923,12 @@ impl Store {
         if self.live.real {
             return;
         }
-        let Some(run_id) = self.runs.iter().find(|r| r.state == RunState::Running).map(|r| r.id.clone()) else {
+        let Some(run_id) = self
+            .runs
+            .iter()
+            .find(|r| r.state == RunState::Running)
+            .map(|r| r.id.clone())
+        else {
             return;
         };
         let mut wrote_ck = None;
@@ -1323,13 +1965,17 @@ impl Store {
                         c.st = CkSt::Ord;
                     }
                 }
-                r.ckpts.insert(0, Ckpt {
-                    id: format!("c{}", r.iter as u64 + (r.steps * 1e6) as u64),
-                    label: label.clone(),
-                    score: reward,
-                    st: CkSt::Best,
-                    pname: None,
-                });
+                r.ckpts.insert(
+                    0,
+                    Ckpt {
+                        score_known: true,
+                        id: format!("c{}", r.iter as u64 + (r.steps * 1e6) as u64),
+                        label: label.clone(),
+                        score: reward,
+                        st: CkSt::Best,
+                        pname: None,
+                    },
+                );
                 // Retention, enforced: last 4 ordinary + best + all promoted.
                 let mut ord = 0;
                 r.ckpts.retain(|c| match c.st {
@@ -1383,7 +2029,10 @@ impl Store {
         crate::nexus::init_env();
         for s in crate::nexus::scene::list() {
             let ui = crate::nexus::to_ui(&s);
-            if !self.scenes.iter().any(|x| x.id == ui.id) {
+            if !self.scenes.iter().any(|x| {
+                x.id == ui.id
+                    || crate::nexus::from_ui(x).path() == crate::nexus::from_ui(&ui).path()
+            }) {
                 self.scenes.push(ui);
             }
         }
@@ -1391,13 +2040,20 @@ impl Store {
             let id = format!("disk:{}", r.name);
             if !self.recordings.iter().any(|x| x.id == id) {
                 self.recordings.push(Recording {
+                    robot: None,
+                    run: None,
                     id,
                     name: r.name.clone(),
                     scene: r.scene.clone(),
                     frames: r.frames as u32,
                     resets: r.resets as u32,
                     dist: r.distance as f64,
-                    path: Some(format!("{}/{}", crate::nexus::repo_dir(), r.rollout.display())),
+                    path: Some(
+                        std::path::Path::new(&crate::nexus::repo_dir())
+                            .join(&r.rollout)
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
                 });
             }
         }
@@ -1410,6 +2066,143 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switching_scenes_preserves_dirty_draft() {
+        let mut s = Store::seed();
+        let original = s.sel.scene.clone();
+        s.edit_field("friction", 0.42);
+        let other = s
+            .scenes
+            .iter()
+            .find(|sc| Some(&sc.id) != original.as_ref())
+            .unwrap()
+            .id
+            .clone();
+        s.sel_scene(&other);
+        assert_eq!(s.sel.scene, original);
+        assert!(s.dirty);
+        assert_eq!(s.draft.as_ref().unwrap().friction, 0.42);
+        s.sel_scene(original.as_deref().unwrap());
+        assert!(s.dirty, "clicking the current scene must not discard edits");
+        s.revert();
+        s.sel_scene(&other);
+        assert_eq!(s.sel.scene.as_deref(), Some(other.as_str()));
+    }
+
+    #[test]
+    fn empty_and_broken_sets_cannot_launch() {
+        let mut s = Store::seed();
+        let before = s.runs.len();
+        let id = s.sel.set.clone().unwrap();
+        s.sets
+            .iter_mut()
+            .find(|st| st.id == id)
+            .unwrap()
+            .members
+            .clear();
+        s.launch("empty", "Fresh");
+        assert_eq!(s.runs.len(), before);
+        s.sets
+            .iter_mut()
+            .find(|st| st.id == id)
+            .unwrap()
+            .members
+            .push("missing".into());
+        s.launch("broken", "Fresh");
+        assert_eq!(s.runs.len(), before);
+    }
+
+    #[test]
+    fn metrics_and_checkpoint_selection_follow_their_run() {
+        let mut s = Store::seed();
+        s.demo = false;
+        s.runs[0].metrics = vec![RunMetric {
+            fall_rate_unmeasured: false,
+            step: 10,
+            reward: 2.5,
+            fall_rate: 0.2,
+            steps_per_sec: 123.0,
+        }];
+        s.runs[1].metrics = vec![];
+        s.sel.run = Some(s.runs[0].id.clone());
+        s.sync_run_metrics();
+        assert_eq!(s.live.reward, 2.5);
+        assert_eq!(s.live.falls, 20.0);
+        let (name, ck) = (s.runs[1].name.clone(), s.runs[1].ckpts[0].clone());
+        s.pick_ck(&name, &ck.label);
+        s.sync_run_metrics();
+        assert_eq!(s.sel.run.as_ref(), Some(&s.runs[1].id));
+        assert_eq!(s.sel.ck.as_ref(), Some(&ck.id));
+        assert!(s.live.hist.is_empty());
+        assert_eq!(s.live.sps, 0.0);
+    }
+
+    #[test]
+    fn rerun_keeps_recipe_and_clears_previous_results() {
+        let mut s = Store::seed();
+        s.demo = false;
+        s.sel.run = Some(s.runs[0].id.clone());
+        let original = serde_json::json!({"robot":"Microduck", "recipe":{"task":"original", "num_envs":2,"iterations":3}});
+        s.runs[0].snapshot.backend = Some("external".into());
+        s.runs[0].snapshot.training_profile = Some(original.clone());
+        s.runs[0].snapshot.robot = Some("Microduck".into());
+        s.runs[0].metrics.push(RunMetric {
+            fall_rate_unmeasured: false,
+            step: 10,
+            reward: 2.0,
+            fall_rate: 0.0,
+            steps_per_sec: 20.0,
+        });
+        s.rerun_yes("reproduced");
+        crate::nexus::configure_external_run(&mut s.runs[0], None).unwrap();
+        assert_eq!(s.runs[0].name, "reproduced");
+        assert_eq!(s.runs[0].snapshot.training_profile, Some(original));
+        assert_eq!(s.runs[0].iters_per, 3);
+        assert!(s.runs[0].best.is_none());
+        assert!(s.runs[0].metrics.is_empty());
+        assert!(s.runs[0].ckpts.is_empty());
+        assert!(s.sel.ck.is_none());
+    }
+
+    #[test]
+    fn checkpoint_picker_disambiguates_identical_run_names() {
+        let mut s = Store::seed();
+        s.runs[1].name = s.runs[0].name.clone();
+        let (id, ck) = (s.runs[1].id.clone(), s.runs[1].ckpts[0].id.clone());
+        s.pick_ck(&id, &ck);
+        assert_eq!(s.sel.run.as_ref(), Some(&id));
+        assert_eq!(s.sel.ck.as_ref(), Some(&ck));
+    }
+
+    #[test]
+    fn robot_rename_preserves_model_and_historical_references() {
+        let mut s = Store::seed();
+        let id = s.robots[0].id.clone();
+        s.sel.robot = Some(id.clone());
+        let model = s.robots[0].name.clone();
+        let run = s.runs[0].snapshot.robot.clone();
+        s.rename_robot("  Laboratory G1  ").unwrap();
+        assert_eq!(s.robots[0].name, "Laboratory G1");
+        assert_eq!(s.robots[0].model_name(), model);
+        assert_eq!(s.runs[0].snapshot.robot, run);
+        assert!(!s.robot_references(&id).is_empty());
+        assert!(s.remove_robot().is_err());
+        assert_eq!(s.robots.len(), 1);
+    }
+    #[test]
+    fn unused_robot_removal_and_undo_work() {
+        let mut s = Store::seed();
+        s.runs.clear();
+        s.recordings.clear();
+        let robot = s.robots[0].clone();
+        s.remove_robot().unwrap();
+        assert!(s.robots.is_empty());
+        let undo = s.toasts.last().unwrap().undo.clone().unwrap();
+        s.apply_undo(undo);
+        assert_eq!(s.robots[0].id, robot.id);
+        assert_eq!(s.sel.robot.as_ref(), Some(&robot.id));
+    }
 
     fn run_gates(s: &mut Store) {
         s.gate_start(GateId::Export);
@@ -1440,7 +2233,14 @@ mod tests {
         s.dep_pick_ck("crouch-v2", "ck-3200k");
         assert_eq!(s.dg.pname.as_deref(), Some("crouch-v2-final"));
         run_gates(&mut s);
-        assert!(s.dg.gates_ok(), "gates: {:?} {:?} {:?} {:?}", s.dg.export, s.dg.compat, s.dg.sim2sim, s.dg.dryrun);
+        assert!(
+            s.dg.gates_ok(),
+            "gates: {:?} {:?} {:?} {:?}",
+            s.dg.export,
+            s.dg.compat,
+            s.dg.sim2sim,
+            s.dg.dryrun
+        );
         for i in 0..4 {
             s.dep_chk(i, true);
         }

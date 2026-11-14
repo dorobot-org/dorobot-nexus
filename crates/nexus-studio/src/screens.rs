@@ -15,6 +15,32 @@ script_mod! {
     use mod.widgets.nx.*
 
     mod.widgets.screens = {}
+    mod.widgets.screens.Row = View{
+        width: Fill height: Fit flow: Down spacing: 2.0
+        padding: Inset{left:9.0 right:7.0 top:5.0 bottom:5.0}
+        cursor: MouseCursor.Hand show_bg: true
+        draw_bg +: {
+            light: instance(0.0) on: instance(0.0) hover: instance(0.0)
+            dimmed: instance(0.0) frac: instance(0.0)
+            pixel: fn() {
+                let base=mix(#x141312,#xFBFAF8,self.light)
+                let selected=mix(#x2A1708,#xF7E4D8,self.light)
+                let fill=mix(base,selected,max(self.on,self.hover*0.4))
+                let accent=mix(#xEF6F2E,#xD15010,self.light)
+                return mix(fill,accent,step(self.pos.x*self.rect_size.x,2.0)*self.on)
+            }
+        }
+        nm := Label{
+            width: Fill height: Fit max_lines: 3 text_overflow: Ellipsis text:""
+            draw_text +: {
+                light: instance(0.0) dimmed: instance(0.0)
+                text_style: mod.widgets.nx.T_BODY{}
+                get_color: fn(){return mix(mix(#xF2F0EC,#x161413,self.light),mix(#x6B625B,#x7A7169,self.light),self.dimmed)}
+            }
+        }
+        tg := mod.widgets.nx.BodyLbl{width: Fill height: Fit max_lines: 2 text_overflow: Ellipsis}
+        pill := mod.widgets.nx.Pill{visible:false}
+    }
 
     // ------------------------------------------------------------ stage --
     mod.widgets.screens.Stage = View{
@@ -57,6 +83,7 @@ script_mod! {
 
         urdf_wrap := View{
             width: Fill height: Fill
+            flow: Right
             visible: false
             padding: Inset{left: 2. right: 2. top: 2. bottom: 2.}
             rview := RobotView{
@@ -82,6 +109,12 @@ script_mod! {
                 // The scene this console validates against agrees: the
                 // playground G1 flat-terrain XML sets reflectance="0". Only
                 // the *_pretty variants use 0.2.
+                floor_reflectance: 0.0
+            }
+            rview_b := RobotView{
+                visible: false width: Fill height: Fill
+                sky_horizon: #x26404F sky_zenith: #x4D80B3
+                ground_color: #x334D66 ground2_color: #x1A3350 grid_color: #xB3B3B3
                 floor_reflectance: 0.0
             }
         }
@@ -365,12 +398,12 @@ script_mod! {
         // verdict
         ver := mod.widgets.nx.Verdict{ visible: false }
         // selectable row
-        row := mod.widgets.nx.NxRow{ visible: false }
+        row := mod.widgets.screens.Row{ visible: false }
         // action strip
         btns := View{
             width: Fill height: Fit
             visible: false
-            flow: Right
+            flow: Flow.Right{wrap: true}
             spacing: 4.0
             padding: Inset{top: 2. bottom: 2.}
             b0 := mod.widgets.nx.Mini{ visible: false }
@@ -385,7 +418,7 @@ script_mod! {
             flow: Right
             align: Align{y: 0.5}
             padding: Inset{top: 6.}
-            cl := mod.widgets.nx.Cap{}
+            cl := mod.widgets.nx.Cap{width: Fill max_lines: 2 text_overflow: Ellipsis}
             Filler{}
             cb := mod.widgets.nx.Mini{ visible: false }
         }
@@ -430,6 +463,9 @@ script_mod! {
         r15 := RLine{} r16 := RLine{} r17 := RLine{} r18 := RLine{} r19 := RLine{}
         r20 := RLine{} r21 := RLine{} r22 := RLine{} r23 := RLine{} r24 := RLine{}
         r25 := RLine{} r26 := RLine{} r27 := RLine{}
+        r28 := RLine{} r29 := RLine{} r30 := RLine{} r31 := RLine{}
+        r32 := RLine{} r33 := RLine{} r34 := RLine{} r35 := RLine{}
+        r36 := RLine{} r37 := RLine{} r38 := RLine{} r39 := RLine{}
     }
 
     // ------------------------------------------------------------- home --
@@ -459,10 +495,10 @@ script_mod! {
             Filler{}
             open := mod.widgets.nx.Mini{ text: "open →" }
         }
-        row0 := mod.widgets.nx.NxRow{ visible: false }
-        row1 := mod.widgets.nx.NxRow{ visible: false }
-        row2 := mod.widgets.nx.NxRow{ visible: false }
-        row3 := mod.widgets.nx.NxRow{ visible: false }
+        row0 := mod.widgets.screens.Row{ visible: false }
+        row1 := mod.widgets.screens.Row{ visible: false }
+        row2 := mod.widgets.screens.Row{ visible: false }
+        row3 := mod.widgets.screens.Row{ visible: false }
         extra := mod.widgets.nx.BodyLbl{ visible: false }
         mini_heatw := View{ width: Fill height: Fit visible: false
             mini_heat := Heat{ height: 64 }
@@ -478,7 +514,7 @@ script_mod! {
 
         statrow := View{
             width: Fill height: Fit
-            flow: Right
+            flow: Flow.Right{wrap: true}
             spacing: 6.0
             s0 := mod.widgets.nx.Tile{} s1 := mod.widgets.nx.Tile{} s2 := mod.widgets.nx.Tile{}
             s3 := mod.widgets.nx.Tile{} s4 := mod.widgets.nx.Tile{} s5 := mod.widgets.nx.Tile{}
@@ -576,7 +612,7 @@ script_mod! {
 
     // ------------------------------------------------------------ toast --
     mod.widgets.screens.ToastV = View{
-        width: Fit height: Fit
+        width: Fill height: Fit
         flow: Right
         align: Align{y: 0.5}
         spacing: 8.0
@@ -597,14 +633,16 @@ script_mod! {
                 return sdf.result
             }
         }
-        lbl := mod.widgets.nx.InkLbl{}
+        lbl := mod.widgets.nx.InkLbl{width: Fill max_lines: 3 text_overflow: Ellipsis}
         undo := mod.widgets.nx.Mini{ visible: false text: "Undo" }
     }
 
     // ------------------------------------------------------------ modal --
     mod.widgets.screens.ModalHost = View{
         width: Fill height: Fill
-        flow: Overlay
+        flow: Down
+        padding: Inset{left: 16. right: 16. top: 16. bottom: 16.}
+        scroll_bars: ScrollBars{show_scroll_x: false show_scroll_y: true}
         align: Align{x: 0.5 y: 0.5}
         show_bg: true
         draw_bg +: {
@@ -663,14 +701,14 @@ script_mod! {
                 width: Fill height: Fit visible: false
                 input2 := TextInput{ width: Fill text: "" empty_text: "" }
             }
-            opt0 := mod.widgets.nx.NxRow{ visible: false }
-            opt1 := mod.widgets.nx.NxRow{ visible: false }
-            opt2 := mod.widgets.nx.NxRow{ visible: false }
-            opt3 := mod.widgets.nx.NxRow{ visible: false }
-            opt4 := mod.widgets.nx.NxRow{ visible: false }
-            opt5 := mod.widgets.nx.NxRow{ visible: false }
-            opt6 := mod.widgets.nx.NxRow{ visible: false }
-            opt7 := mod.widgets.nx.NxRow{ visible: false }
+            opt0 := mod.widgets.screens.Row{ visible: false }
+            opt1 := mod.widgets.screens.Row{ visible: false }
+            opt2 := mod.widgets.screens.Row{ visible: false }
+            opt3 := mod.widgets.screens.Row{ visible: false }
+            opt4 := mod.widgets.screens.Row{ visible: false }
+            opt5 := mod.widgets.screens.Row{ visible: false }
+            opt6 := mod.widgets.screens.Row{ visible: false }
+            opt7 := mod.widgets.screens.Row{ visible: false }
             chk0 := mod.widgets.nx.ChkRow{ visible: false }
             chk1 := mod.widgets.nx.ChkRow{ visible: false }
             chk2 := mod.widgets.nx.ChkRow{ visible: false }
@@ -697,9 +735,9 @@ script_mod! {
 
 /// True when a View-like widget was released under the pointer.
 pub fn view_clicked(actions: &Actions, uid: WidgetUid) -> bool {
-    actions.filter_widget_actions(uid).any(|a| {
-        matches!(a.cast::<ViewAction>(), ViewAction::FingerUp(fe) if fe.is_over)
-    })
+    actions
+        .filter_widget_actions(uid)
+        .any(|a| matches!(a.cast::<ViewAction>(), ViewAction::FingerUp(fe) if fe.is_over))
 }
 
 fn t(lang: usize, k: &str) -> String {
@@ -710,7 +748,15 @@ fn caps(s: &str) -> String {
     s.to_uppercase()
 }
 
-pub fn set_chip(cx: &mut Cx, root: &WidgetRef, path: &[LiveId], text: &str, dot_tone: Option<f64>, _pulse: bool, l: f32) {
+pub fn set_chip(
+    cx: &mut Cx,
+    root: &WidgetRef,
+    path: &[LiveId],
+    text: &str,
+    dot_tone: Option<f64>,
+    _pulse: bool,
+    l: f32,
+) {
     let chip = root.widget(cx, path);
     if chip.is_empty() {
         return;
@@ -757,7 +803,16 @@ fn set_label(cx: &mut Cx, holder: &WidgetRef, path: &[LiveId], text: &str, l: f3
     script_apply_eval!(cx, w, { draw_text +: { light: #(l as f64) } });
 }
 
-fn set_btn(cx: &mut Cx, holder: &WidgetRef, path: &[LiveId], text: &str, vis: bool, on: bool, enabled: bool, l: f32) {
+fn set_btn(
+    cx: &mut Cx,
+    holder: &WidgetRef,
+    path: &[LiveId],
+    text: &str,
+    vis: bool,
+    on: bool,
+    enabled: bool,
+    l: f32,
+) {
     let b = holder.button(cx, path);
     if b.is_empty() {
         return;
@@ -790,13 +845,15 @@ pub enum LAct {
     SelTarget(String),
     Replay(String),
     SelRecipe(usize),
+    ExternalCase(usize),
+    EvaluationCase(usize),
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct LSpec {
     pub grp: Option<String>,
     pub row: Option<(String, String, Option<(String, f64)>, bool, bool)>, // name, tag, pill, on, dimmed
-    pub acts: Vec<(String, bool)>, // label, hot
+    pub acts: Vec<(String, bool)>,                                        // label, hot
     pub note: Option<String>,
     pub click: LAct,
     pub act_ids: Vec<&'static str>, // symbolic action names for minis
@@ -810,10 +867,28 @@ impl Default for LAct {
 
 fn lslot_paths() -> [&'static [LiveId]; N_LSLOTS_PUB] {
     [
-        ids!(lslot0), ids!(lslot1), ids!(lslot2), ids!(lslot3), ids!(lslot4), ids!(lslot5),
-        ids!(lslot6), ids!(lslot7), ids!(lslot8), ids!(lslot9), ids!(lslot10), ids!(lslot11),
-        ids!(lslot12), ids!(lslot13), ids!(lslot14), ids!(lslot15), ids!(lslot16), ids!(lslot17),
-        ids!(lslot18), ids!(lslot19), ids!(lslot20), ids!(lslot21),
+        ids!(lslot0),
+        ids!(lslot1),
+        ids!(lslot2),
+        ids!(lslot3),
+        ids!(lslot4),
+        ids!(lslot5),
+        ids!(lslot6),
+        ids!(lslot7),
+        ids!(lslot8),
+        ids!(lslot9),
+        ids!(lslot10),
+        ids!(lslot11),
+        ids!(lslot12),
+        ids!(lslot13),
+        ids!(lslot14),
+        ids!(lslot15),
+        ids!(lslot16),
+        ids!(lslot17),
+        ids!(lslot18),
+        ids!(lslot19),
+        ids!(lslot20),
+        ids!(lslot21),
     ]
 }
 pub const N_LSLOTS_PUB: usize = 22;
@@ -828,19 +903,36 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
         Mode::Scenes => {
             let head = format!("{} · {}", caps(&tt("Library")), st.scenes.len());
             for set in &st.sets {
-                specs.push(LSpec { grp: Some(format!("{} · {}", caps(&tt("Set")), set.name)), ..Default::default() });
+                specs.push(LSpec {
+                    grp: Some(format!("{} · {}", caps(&tt("Set")), set.name)),
+                    ..Default::default()
+                });
                 for id in &set.members {
                     match st.scene(id) {
                         Some(sc) => {
                             let on = st.sel.scene.as_deref() == Some(id.as_str());
-                            let terrain = if sc.terrain.is_empty() { tt("flat") } else { tt(&sc.terrain) };
+                            let terrain = if sc.terrain.is_empty() {
+                                tt("flat")
+                            } else {
+                                tt(&sc.terrain)
+                            };
                             let mut sp = LSpec {
-                                row: Some((sc.name.clone(), format!("{} · {:.2}", terrain, sc.stance), None, on, false)),
+                                row: Some((
+                                    sc.name.clone(),
+                                    format!("{} · {:.2}", terrain, sc.stance),
+                                    None,
+                                    on,
+                                    false,
+                                )),
                                 click: LAct::SelScene(id.clone()),
                                 ..Default::default()
                             };
                             if on {
-                                sp.acts = vec![(tt("Duplicate"), false), (tt("Add to set ▾"), false), (tt("Delete"), true)];
+                                sp.acts = vec![
+                                    (tt("Duplicate"), false),
+                                    (tt("Add to set ▾"), false),
+                                    (tt("Delete"), true),
+                                ];
                                 sp.act_ids = vec!["dup-scene", "addto-set", "del-scene"];
                             }
                             specs.push(sp);
@@ -855,27 +947,59 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
             let unfiled: Vec<&Scene> = st
                 .scenes
                 .iter()
-                .filter(|s| st.sets_of(&s.id).is_empty() && (st.filter.is_empty() || s.name.contains(&st.filter)))
+                .filter(|s| {
+                    st.sets_of(&s.id).is_empty()
+                        && (st.filter.is_empty() || s.name.contains(&st.filter))
+                })
                 .collect();
-            specs.push(LSpec { grp: Some(caps(&tt("Unfiled"))), ..Default::default() });
+            specs.push(LSpec {
+                grp: Some(caps(&tt("Unfiled"))),
+                ..Default::default()
+            });
             for sc in unfiled {
                 let on = st.sel.scene.as_deref() == Some(sc.id.as_str());
-                let terrain = if sc.terrain.is_empty() { tt("flat") } else { tt(&sc.terrain) };
+                let terrain = if sc.terrain.is_empty() {
+                    tt("flat")
+                } else {
+                    tt(&sc.terrain)
+                };
                 let mut sp = LSpec {
-                    row: Some((sc.name.clone(), format!("{} · {:.2}", terrain, sc.stance), None, on, false)),
+                    row: Some((
+                        sc.name.clone(),
+                        format!("{} · {:.2}", terrain, sc.stance),
+                        None,
+                        on,
+                        false,
+                    )),
                     click: LAct::SelScene(sc.id.clone()),
                     ..Default::default()
                 };
                 if on {
-                    sp.acts = vec![(tt("Duplicate"), false), (tt("Add to set ▾"), false), (tt("Delete"), true)];
+                    sp.acts = vec![
+                        (tt("Duplicate"), false),
+                        (tt("Add to set ▾"), false),
+                        (tt("Delete"), true),
+                    ];
                     sp.act_ids = vec!["dup-scene", "addto-set", "del-scene"];
                 }
                 specs.push(sp);
             }
-            specs.push(LSpec { grp: Some(caps(&tt("Recordings"))), ..Default::default() });
+            specs.push(LSpec {
+                grp: Some(caps(&tt("Recordings"))),
+                ..Default::default()
+            });
             for r in &st.recordings {
                 specs.push(LSpec {
-                    row: Some((r.name.clone(), tf("{0} fr · {1} m", &[&r.frames.to_string(), &format!("{:.1}", r.dist)]), None, false, false)),
+                    row: Some((
+                        r.name.clone(),
+                        tf(
+                            "{0} fr · {1} m",
+                            &[&r.frames.to_string(), &format!("{:.1}", r.dist)],
+                        ),
+                        None,
+                        false,
+                        false,
+                    )),
                     click: LAct::Replay(r.id.clone()),
                     acts: vec![(tt("Delete"), true)],
                     act_ids: vec!["del-rec"],
@@ -889,17 +1013,30 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
             for r in &st.robots {
                 let on = st.sel.robot.as_deref() == Some(r.id.as_str());
                 specs.push(LSpec {
-                    row: Some((r.name.clone(), tf("{0} dof", &[&r.movable.to_string()]), None, on, false)),
+                    row: Some((
+                        r.name.clone(),
+                        tf("{0} dof", &[&r.movable.to_string()]),
+                        None,
+                        on,
+                        false,
+                    )),
                     click: LAct::SelRobot(r.id.clone()),
                     ..Default::default()
                 });
             }
-            specs.push(LSpec { grp: Some(caps(&tt("Lifecycle"))), ..Default::default() });
             specs.push(LSpec {
-                note: Some(tt("Import runs a six-step gate: parse, assets, structure, rehearse, map, commit. A URDF that loads is not a URDF that trains.")),
+                grp: Some(caps(&tt("Lifecycle"))),
                 ..Default::default()
             });
-            (head, Some(("import-robot".to_string(), tt("+ Import"))), specs)
+            specs.push(LSpec {
+                note: Some("Import a URDF with its assets or a portable bundle with saved task settings. Review the model, then configure training. Workspace trash restores removed robot files and settings.".into()),
+                ..Default::default()
+            });
+            (
+                head,
+                Some(("import-robot".to_string(), tt("+ Import"))),
+                specs,
+            )
         }
         Mode::Train => {
             let head = caps(&tt("Stages"));
@@ -907,19 +1044,58 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                 for (i, sname) in r.stages.iter().enumerate() {
                     let mark = if i < r.stage { "✓ " } else { "" };
                     specs.push(LSpec {
-                        row: Some((format!("{mark}{sname}"), String::new(), None, i == r.stage, i > r.stage)),
+                        row: Some((
+                            format!("{mark}{sname}"),
+                            String::new(),
+                            None,
+                            i == r.stage,
+                            i > r.stage,
+                        )),
                         ..Default::default()
                     });
                 }
-                specs.push(LSpec { grp: Some(caps(&tt("Round"))), ..Default::default() });
-                specs.push(LSpec { note: Some(format!("{} {} / 6 · {} {} / {}", tt("round"), r.round, tt("iter"), r.iter, r.iters_per)), ..Default::default() });
-                specs.push(LSpec { grp: Some(caps(&tt("Controls"))), ..Default::default() });
+                specs.push(LSpec {
+                    grp: Some(caps(&tt(if r.set == "robot training task" {
+                        "Iterations"
+                    } else {
+                        "Round"
+                    }))),
+                    ..Default::default()
+                });
+                specs.push(LSpec {
+                    note: Some(if r.set == "robot training task" {
+                        format!("{} {} / {}", tt("iter"), r.iter, r.iters_per)
+                    } else {
+                        format!(
+                            "{} {} / 6 · {} {} / {}",
+                            tt("round"),
+                            r.round,
+                            tt("iter"),
+                            r.iter,
+                            r.iters_per
+                        )
+                    }),
+                    ..Default::default()
+                });
+                specs.push(LSpec {
+                    grp: Some(caps(&tt("Controls"))),
+                    ..Default::default()
+                });
                 let mut sp = LSpec::default();
                 match r.state {
                     RunState::Running => {
                         sp.acts = vec![(tt("▮▮ pause"), false), (tt("■ stop"), false)];
                         sp.act_ids = vec!["pause", "stop"];
-                        if crate::nexus::can_sweep() && app.real_proc.is_none() {
+                        if app
+                            .real_proc
+                            .as_ref()
+                            .and_then(|p| p.train.as_ref())
+                            .is_some_and(|h| !h.can_pause)
+                        {
+                            sp.acts = vec![(tt("■ stop"), false)];
+                            sp.act_ids = vec!["stop"];
+                        }
+                        if crate::nexus::can_sweep(st) && app.real_proc.is_none() {
                             sp.acts.push((tt("▶ real train"), false));
                             sp.act_ids.push("real-train");
                         }
@@ -938,30 +1114,138 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
         }
         Mode::Inspect => {
             let head = caps(&tt("Checkpoint"));
+            specs.push(LSpec {
+                grp: Some("RECORDINGS".into()),
+                ..Default::default()
+            });
+            for rec in &st.recordings {
+                specs.push(LSpec {
+                    row: Some((
+                        rec.name.clone(),
+                        format!("{} frames", rec.frames),
+                        None,
+                        app.review.recording.as_ref() == Some(&rec.id),
+                        false,
+                    )),
+                    click: LAct::Replay(rec.id.clone()),
+                    ..Default::default()
+                });
+            }
+            specs.push(LSpec {
+                acts: vec![("Import training recording".into(), false)],
+                act_ids: vec!["review-training"],
+                ..Default::default()
+            });
+            specs.push(LSpec {
+                grp: Some("CHECKPOINTS".into()),
+                ..Default::default()
+            });
             for r in &st.runs {
                 for c in &r.ckpts {
-                    let on = st.sel.ck.as_deref().unwrap_or("ck-2100k") == c.label
-                        && st.sel.ck_run.as_deref().map(|x| x == r.name).unwrap_or(true);
+                    let on =
+                        st.sel.run.as_ref() == Some(&r.id) && st.sel.ck.as_ref() == Some(&c.id);
                     let star = if c.st == CkSt::Prom { " · ★" } else { "" };
                     specs.push(LSpec {
-                        row: Some((c.label.clone(), format!("{}{star}", r.name), None, on, false)),
-                        click: LAct::PickCk(r.name.clone(), c.label.clone()),
+                        row: Some((
+                            c.label.clone(),
+                            format!("{}{star}", r.name),
+                            None,
+                            on,
+                            false,
+                        )),
+                        click: LAct::PickCk(r.id.clone(), c.id.clone()),
                         ..Default::default()
                     });
                 }
             }
-            specs.push(LSpec { grp: Some(caps(&tt("Probe"))), ..Default::default() });
+            specs.push(LSpec {
+                grp: Some("LIVE SIMULATION".into()),
+                ..Default::default()
+            });
             let mut sp = LSpec::default();
-            sp.acts = vec![(tt("push →"), false), (tt("restart"), false)];
-            sp.act_ids = vec!["push", "restart-probe"];
+            sp.acts = vec![("Start physics".into(), false), ("Recover…".into(), false)];
+            sp.act_ids = vec!["sim-start", "sim-import"];
             specs.push(sp);
             specs.push(LSpec {
-                note: Some(tt("Probes are deliberately ephemeral — a probe is a question, not an artifact. record promotes one to a Recording.")),
+                note: Some("Select a checkpoint, then start live physics. Set velocity, apply forces, step or resume, and save the measured trajectory for review.".into()),
                 ..Default::default()
             });
             (head, None, specs)
         }
+        Mode::Validate if app.evaluation_visible() => {
+            let report = app.evaluation.report.as_ref().unwrap();
+            for (i, case) in report["results"][0].as_array().unwrap().iter().enumerate() {
+                specs.push(LSpec {
+                    row: Some((
+                        format!(
+                            "{} · seed {}",
+                            case["case"].as_str().unwrap_or(""),
+                            case["seed"]
+                        ),
+                        format!("Trial {} · {} frames", i + 1, case["frames"]),
+                        None,
+                        i == app.evaluation.case,
+                        false,
+                    )),
+                    click: LAct::EvaluationCase(i),
+                    ..Default::default()
+                });
+            }
+            ("Measured evaluation".into(), None, specs)
+        }
         Mode::Validate => {
+            if app.external_robot_run().is_some() {
+                if let Some(v) = app.external_validation() {
+                    specs.push(LSpec {
+                        note: Some(format!("Checkpoint {} · {} tests", v.iteration, v.total)),
+                        ..Default::default()
+                    });
+                    specs.push(LSpec {
+                        acts: vec![
+                            ("Newer".into(), false),
+                            ("Older".into(), false),
+                            ("Latest".into(), false),
+                        ],
+                        act_ids: vec!["validation-newer", "validation-older", "validation-latest"],
+                        ..Default::default()
+                    });
+                    specs.push(LSpec {
+                        grp: Some("Recorded tests".into()),
+                        ..Default::default()
+                    });
+                    for (i, case) in v.cases.iter().enumerate() {
+                        specs.push(LSpec {
+                            row: Some((
+                                format!("{} · seed {}", case.case, case.seed),
+                                if case.tracking_pass {
+                                    "PASS".into()
+                                } else {
+                                    "FAIL".into()
+                                },
+                                None,
+                                app.external_motion.case == i,
+                                false,
+                            )),
+                            click: LAct::ExternalCase(i),
+                            ..Default::default()
+                        });
+                    }
+                } else {
+                    specs.push(LSpec {
+                        note: Some("Waiting for a completed checkpoint evaluation.".into()),
+                        ..Default::default()
+                    });
+                }
+                let robot = app
+                    .external_robot_run()
+                    .map(|(_, robot)| robot)
+                    .unwrap_or_default();
+                return (
+                    format!("{robot} validation"),
+                    Some(("external-live".into(), "Live training".into())),
+                    specs,
+                );
+            }
             let head = caps(&tt("Recipe"));
             for (i, rc) in RECIPES.iter().enumerate() {
                 specs.push(LSpec {
@@ -970,14 +1254,35 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                     ..Default::default()
                 });
             }
-            specs.push(LSpec { grp: Some(caps(&tt("Axes"))), ..Default::default() });
+            specs.push(LSpec {
+                grp: Some(caps(&tt("Axes"))),
+                ..Default::default()
+            });
             let rc = &RECIPES[st.sel.recipe];
-            specs.push(LSpec { note: Some(format!("{} · {} — {}", tt(rc.xl), rc.xa, rc.xb)), ..Default::default() });
-            specs.push(LSpec { note: Some(format!("{} · {} — {}", tt(rc.yl), rc.ya, rc.yb)), ..Default::default() });
-            specs.push(LSpec { grp: Some(caps(&tt("Base scene"))), ..Default::default() });
-            specs.push(LSpec { row: Some(("target-60".into(), String::new(), None, true, false)), ..Default::default() });
-            specs.push(LSpec { grp: Some(caps(&tt("Checkpoint"))), ..Default::default() });
-            specs.push(LSpec { row: Some((st.sweep_ckpt.clone(), String::new(), None, true, false)), ..Default::default() });
+            specs.push(LSpec {
+                note: Some(format!("{} · {} — {}", tt(rc.xl), rc.xa, rc.xb)),
+                ..Default::default()
+            });
+            specs.push(LSpec {
+                note: Some(format!("{} · {} — {}", tt(rc.yl), rc.ya, rc.yb)),
+                ..Default::default()
+            });
+            specs.push(LSpec {
+                grp: Some(caps(&tt("Base scene"))),
+                ..Default::default()
+            });
+            specs.push(LSpec {
+                row: Some(("target-60".into(), String::new(), None, true, false)),
+                ..Default::default()
+            });
+            specs.push(LSpec {
+                grp: Some(caps(&tt("Checkpoint"))),
+                ..Default::default()
+            });
+            specs.push(LSpec {
+                row: Some((st.sweep_ckpt.clone(), String::new(), None, true, false)),
+                ..Default::default()
+            });
             let mut sp = LSpec::default();
             match st.sweep_state {
                 SweepState::Running => {
@@ -985,7 +1290,7 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                     sp.act_ids = vec!["sweep-stop"];
                 }
                 _ => {
-                    if crate::nexus::can_sweep() {
+                    if crate::nexus::can_sweep(st) {
                         sp.acts = vec![(tt("▶ run sweep"), false)];
                         sp.act_ids = vec!["sweep-run"];
                     }
@@ -996,7 +1301,7 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                 }
             }
             specs.push(sp);
-            if !crate::nexus::can_sweep() && st.sweep_state != SweepState::Running {
+            if !crate::nexus::can_sweep(st) && st.sweep_state != SweepState::Running {
                 specs.push(LSpec {
                     note: Some(tt("No checkpoint to sweep yet — train one first.")),
                     ..Default::default()
@@ -1008,7 +1313,10 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
             // modelling error, which is the failure that decides whether a
             // policy survives a real robot — so it gets its own group rather
             // than sitting among the sweep's controls.
-            specs.push(LSpec { grp: Some(caps(&tt("Sim-to-sim"))), ..Default::default() });
+            specs.push(LSpec {
+                grp: Some(caps(&tt("Sim-to-sim"))),
+                ..Default::default()
+            });
             match nexus_engine::mujoco::why_unavailable() {
                 None => {
                     let mut mp = LSpec::default();
@@ -1029,7 +1337,10 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                     });
                 }
                 // Say why rather than offer a control that fails when pressed.
-                Some(why) => specs.push(LSpec { note: Some(why), ..Default::default() }),
+                Some(why) => specs.push(LSpec {
+                    note: Some(why),
+                    ..Default::default()
+                }),
             }
 
             // The weaker arm, offered separately and described as weaker. Both
@@ -1055,23 +1366,44 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
             (head, None, specs)
         }
         Mode::Runs => {
-            let head = caps(&trf(lang, "Ledger · {0} runs", &[&st.runs.len().to_string()]));
+            let head = caps(&trf(
+                lang,
+                "Ledger · {0} runs",
+                &[&st.runs.len().to_string()],
+            ));
             for r in &st.runs {
                 let on = st.sel.run.as_deref() == Some(r.id.as_str());
-                let name = if r.id == "kept" { tt("(kept checkpoints)") } else { r.name.clone() };
+                let name = if r.id == "kept" {
+                    tt("(kept checkpoints)")
+                } else {
+                    r.name.clone()
+                };
                 let (ptxt, ptone) = if r.archived {
                     (tt("archived"), 4.0)
                 } else {
-                    (tt(r.state.key()), match r.state {
-                        RunState::Running => 0.0,
-                        RunState::Completed => 1.0,
-                        RunState::Paused | RunState::Stopped => 2.0,
-                        RunState::Failed => 3.0,
-                    })
+                    (
+                        tt(r.state.key()),
+                        match r.state {
+                            RunState::Running => 0.0,
+                            RunState::Completed => 1.0,
+                            RunState::Paused | RunState::Stopped => 2.0,
+                            RunState::Failed => 3.0,
+                            _ => 2.0,
+                        },
+                    )
                 };
-                let best = r.best.map(|b| format!("{b:.3}")).unwrap_or_else(|| "—".into());
+                let best = r
+                    .best
+                    .map(|b| format!("{b:.3}"))
+                    .unwrap_or_else(|| "—".into());
                 specs.push(LSpec {
-                    row: Some((name, format!("{:.2}M · {} {}", r.steps, tt("best"), best), Some((ptxt, ptone)), on, r.archived)),
+                    row: Some((
+                        name,
+                        format!("{:.2}M · {} {}", r.steps, tt("best"), best),
+                        Some((ptxt, ptone)),
+                        on,
+                        r.archived,
+                    )),
                     click: LAct::SelRun(r.id.clone()),
                     ..Default::default()
                 });
@@ -1082,30 +1414,64 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
             let head = caps(&tt("Policy"));
             let mut any = false;
             for r in &st.runs {
-                for c in r.ckpts.iter().filter(|c| c.st == CkSt::Prom) {
+                for c in r.ckpts.iter().filter(|c| !st.demo || c.st == CkSt::Prom) {
                     any = true;
-                    let on = st.dg.ck.as_deref() == Some(c.label.as_str()) && st.dg.ck_run.as_deref() == Some(r.name.as_str());
+                    let on = if st.demo {
+                        st.dg.ck.as_deref() == Some(c.label.as_str())
+                            && st.dg.ck_run.as_deref() == Some(r.name.as_str())
+                    } else {
+                        st.sel.ck.as_deref() == Some(c.id.as_str())
+                            && st.sel.run.as_deref() == Some(r.id.as_str())
+                    };
                     specs.push(LSpec {
                         row: Some((
-                            format!("★ {}", c.pname.clone().unwrap_or_else(|| c.label.clone())),
+                            format!(
+                                "{}{}",
+                                if c.st == CkSt::Prom { "★ " } else { "" },
+                                c.pname.clone().unwrap_or_else(|| c.label.clone())
+                            ),
                             format!("{} · {}", c.label, r.name),
                             None,
                             on,
                             false,
                         )),
-                        click: LAct::DepPickCk(r.name.clone(), c.label.clone()),
+                        click: if st.demo {
+                            LAct::DepPickCk(r.name.clone(), c.label.clone())
+                        } else {
+                            LAct::DepPickCk(r.id.clone(), c.id.clone())
+                        },
                         ..Default::default()
                     });
                 }
             }
             if !any {
-                specs.push(LSpec { note: Some(tt("Only promoted checkpoints deploy — promote one in Train first.")), ..Default::default() });
+                specs.push(LSpec {
+                    note: Some(if st.demo {
+                        tt("Only promoted checkpoints deploy — promote one in Train first.")
+                    } else {
+                        "Train or import a checkpoint to prepare a target policy.".into()
+                    }),
+                    ..Default::default()
+                });
             }
-            let nonprom: usize = st.runs.iter().map(|r| r.ckpts.iter().filter(|c| c.st != CkSt::Prom).count()).sum();
-            if nonprom > 0 {
-                specs.push(LSpec { note: Some(tf("{0} unpromoted checkpoints are not eligible", &[&nonprom.to_string()])), ..Default::default() });
+            let nonprom: usize = st
+                .runs
+                .iter()
+                .map(|r| r.ckpts.iter().filter(|c| c.st != CkSt::Prom).count())
+                .sum();
+            if st.demo && nonprom > 0 {
+                specs.push(LSpec {
+                    note: Some(tf(
+                        "{0} unpromoted checkpoints are not eligible",
+                        &[&nonprom.to_string()],
+                    )),
+                    ..Default::default()
+                });
             }
-            specs.push(LSpec { grp: Some(format!("{} · {}", caps(&tt("Targets")), st.targets.len())), ..Default::default() });
+            specs.push(LSpec {
+                grp: Some(format!("{} · {}", caps(&tt("Targets")), st.targets.len())),
+                ..Default::default()
+            });
             for tg in &st.targets {
                 let on = st.dg.target.as_deref() == Some(tg.id.as_str());
                 let (ptxt, ptone) = match tg.ping {
@@ -1115,19 +1481,32 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
                     Ping::Unprobed => (tt("unprobed"), 4.0),
                 };
                 let mut sp = LSpec {
-                    row: Some((tg.name.clone(), format!("{} · {}", tg.model, tg.iface), Some((ptxt, ptone)), on, false)),
+                    row: Some((
+                        tg.name.clone(),
+                        format!("{} · {}", tg.model, tg.ip),
+                        Some((ptxt, ptone)),
+                        on,
+                        false,
+                    )),
                     click: LAct::SelTarget(tg.id.clone()),
                     ..Default::default()
                 };
                 if on {
-                    sp.acts = vec![(tt("ping"), false), (tt("edit"), false), (tt("Delete"), true)];
+                    sp.acts = vec![
+                        (tt("ping"), false),
+                        (tt("edit"), false),
+                        (tt("Delete"), true),
+                    ];
                     sp.act_ids = vec!["target-ping", "target-edit", "target-del"];
                 }
                 specs.push(sp);
             }
-            specs.push(LSpec { grp: Some(caps(&tt("Lifecycle"))), ..Default::default() });
             specs.push(LSpec {
-                note: Some(tt("A deployment certifies one (policy, target) pair — change either and the gates reset.")),
+                grp: Some(caps(&tt("Lifecycle"))),
+                ..Default::default()
+            });
+            specs.push(LSpec {
+                note: Some(tt(if st.demo { "A deployment certifies one (policy, target) pair — change either and the gates reset." } else { "Prepare and dry-run a captured policy, then arm explicitly. Agent watchdogs stop stale sessions. Reports distinguish simulator and hardware evidence." })),
                 ..Default::default()
             });
             (head, Some(("target-new".to_string(), tt("+ Add"))), specs)
@@ -1138,7 +1517,18 @@ fn build_left_specs(app: &App) -> (String, Option<(String, String)>, Vec<LSpec>)
 
 pub fn sync_left_rail(app: &mut App, cx: &mut Cx) {
     let l = app.light();
-    let (head, head_btn, specs) = build_left_specs(app);
+    let (head, head_btn, all) = build_left_specs(app);
+    if app.left_page_mode != Some(app.st.mode) {
+        app.left_page = 0;
+        app.left_page_mode = Some(app.st.mode);
+    }
+    let pages = all.len().div_ceil(22).max(1);
+    app.left_page = app.left_page.min(pages - 1);
+    let specs = all
+        .into_iter()
+        .skip(app.left_page * 22)
+        .take(22)
+        .collect::<Vec<_>>();
     {
         let railw0 = app.ui.widget(cx, ids!(rail_l));
         let fw = railw0.view(cx, ids!(filter_wrap));
@@ -1151,6 +1541,34 @@ pub fn sync_left_rail(app: &mut App, cx: &mut Cx) {
     if railw.is_empty() {
         return;
     }
+    railw.view(cx, ids!(lp)).set_visible(cx, pages > 1);
+    set_label(
+        cx,
+        &railw,
+        ids!(lp.label),
+        &format!("{} / {}", app.left_page + 1, pages),
+        l,
+    );
+    set_btn(
+        cx,
+        &railw,
+        ids!(lp.prev),
+        "←",
+        app.left_page > 0,
+        false,
+        true,
+        l,
+    );
+    set_btn(
+        cx,
+        &railw,
+        ids!(lp.next),
+        "→",
+        app.left_page + 1 < pages,
+        false,
+        true,
+        l,
+    );
     {
         let mut p = app.ui.view(cx, ids!(rail_l));
         script_apply_eval!(cx, p, { draw_bg +: { light: #(l as f64) } });
@@ -1158,7 +1576,16 @@ pub fn sync_left_rail(app: &mut App, cx: &mut Cx) {
     set_label(cx, &railw, ids!(cap_head.cap), &head, l);
     app.lhead_act = head_btn.as_ref().map(|(a, _)| a.clone());
     match &head_btn {
-        Some((_, label)) => set_btn(cx, &railw, ids!(cap_head.cap_btn), label, true, false, true, l),
+        Some((_, label)) => set_btn(
+            cx,
+            &railw,
+            ids!(cap_head.cap_btn),
+            label,
+            true,
+            false,
+            true,
+            l,
+        ),
         None => {
             let b = railw.button(cx, ids!(cap_head.cap_btn));
             if !b.is_empty() {
@@ -1190,6 +1617,8 @@ pub fn sync_left_rail(app: &mut App, cx: &mut Cx) {
         if let Some((nm, tg, pill, on, dim)) = &spec.row {
             set_label(cx, &slot, ids!(row.nm), nm, l);
             set_label(cx, &slot, ids!(row.tg), tg, l);
+            slot.widget(cx, ids!(row.tg))
+                .set_visible(cx, !tg.is_empty());
             let onf = if *on { 1.0 } else { 0.0 };
             let dimf = if *dim { 1.0 } else { 0.0 };
             let mut rv = slot.widget(cx, ids!(row));
@@ -1240,11 +1669,18 @@ pub fn route_left_rail(app: &mut App, cx: &mut Cx, actions: &Actions) {
     if railw.is_empty() {
         return;
     }
+    for (id, act) in [(ids!(lp.prev), "list-prev"), (ids!(lp.next), "list-next")] {
+        if railw.button(cx, id).clicked(actions) {
+            app.dispatch_named(cx, act, "");
+            return;
+        }
+    }
     {
         let fi = railw.text_input(cx, ids!(filter_wrap.filter_in));
         if !fi.is_empty() {
             if let Some(v) = fi.changed(actions) {
                 app.st.filter = v;
+                app.left_page = 0;
                 sync_left_rail(app, cx);
                 app.redraw_ui(cx);
                 return;
@@ -1296,4 +1732,7 @@ mod stage_tl;
 pub use home_sync::{route_home, sync_home};
 pub use modal_sync::{modal_back, modal_danger, modal_ok, modal_opt, route_modal, sync_modal};
 pub use rail_r::{route_right_rail, sync_right_rail, RSpec};
-pub use stage_tl::{route_composer, route_stage_tl, route_toasts, sync_mode_frame, sync_stage_tl, sync_sweep_fast, sync_toasts, sync_transport_fast};
+pub use stage_tl::{
+    route_composer, route_stage_tl, route_toasts, sync_mode_frame, sync_stage_tl, sync_sweep_fast,
+    sync_toasts, sync_transport_fast,
+};

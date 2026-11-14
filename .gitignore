@@ -20,3 +20,44 @@ curriculum.safetensors
 
 # MuJoCo sim2sim stack (venv, playground, menagerie meshes)
 mujoco-stack/
+
+# Pinned upstream trainers and their Python environments.
+training-stack/
+tools/training/__pycache__/
+
+# Makepad Studio local terminal and debugging state.
+/.makepad/
+
+# Workspace writer lock, migration backups and generated policy bundles.
+/.studio-workspace.lock
+/studio-workspace.*.backup.json
+/studio-workspace.json.tmp
+/exports/
+/simulations/
+/evaluations/
+
+/deployments/
+tools/deploy/__pycache__/
+tools/jobs/__pycache__/
+
+# Private local configuration, credentials and generated data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+id_rsa*
+id_ed25519*
+*.local.json
+.venv*/
+__pycache__/
+*.pyc
+*.log
+/datasets/
+/recordings/
+/docs/completion-evidence/
+/docs/audit-*/
+/docs/verification-*.json
+/studio-workspace.json
+/robots/

@@ -19,23 +19,67 @@ pub fn sync_home(app: &mut App, cx: &mut Cx) {
     let st = &app.st;
     let total_steps: f64 = st.runs.iter().map(|r| r.steps).sum();
     let ck_n: usize = st.runs.iter().map(|r| r.ckpts.len()).sum();
-    let best = st.runs.iter().filter_map(|r| r.best).fold(f64::MIN, f64::max);
+    let best = st
+        .sel
+        .run
+        .as_ref()
+        .and_then(|id| st.run(id))
+        .and_then(|r| r.best);
     let live_run = st.runs.iter().any(|r| r.state == RunState::Running);
-    let live_deps = st.deploys.iter().filter(|d| d.state == DepState::Live).count();
+    let live_deps = st
+        .deploys
+        .iter()
+        .filter(|d| d.state == DepState::Live)
+        .count();
     let stats: Vec<(String, String, String)> = vec![
-        (tt("runs"), st.runs.len().to_string(), if live_run { tt("1 live") } else { tt("none live") }),
+        (
+            tt("runs"),
+            st.runs.len().to_string(),
+            if live_run {
+                tt("1 live")
+            } else {
+                tt("none live")
+            },
+        ),
         (tt("env-steps"), format!("{total_steps:.2}M"), String::new()),
         (tt("checkpoints"), ck_n.to_string(), String::new()),
-        (tt("best reward"), if best > f64::MIN { format!("{best:.3}") } else { "—".into() }, String::new()),
+        (
+            "Selected run best reward".into(),
+            if let Some(best) = best {
+                format!("{best:.3}")
+            } else {
+                "—".into()
+            },
+            String::new(),
+        ),
         (tt("scenes"), st.scenes.len().to_string(), String::new()),
         (tt("sets"), st.sets.len().to_string(), String::new()),
         (tt("robots"), st.robots.len().to_string(), String::new()),
-        (tt("recordings"), st.recordings.len().to_string(), String::new()),
-        (tt("deploys"), st.deploys.len().to_string(), if live_deps > 0 { tf("{0} live", &[&live_deps.to_string()]) } else { tt("none live") }),
+        (
+            tt("recordings"),
+            st.recordings.len().to_string(),
+            String::new(),
+        ),
+        (
+            tt("deploys"),
+            st.deploys.len().to_string(),
+            if live_deps > 0 {
+                tf("{0} live", &[&live_deps.to_string()])
+            } else {
+                tt("none live")
+            },
+        ),
     ];
     let spaths = [
-        ids!(statrow.s0), ids!(statrow.s1), ids!(statrow.s2), ids!(statrow.s3), ids!(statrow.s4),
-        ids!(statrow.s5), ids!(statrow.s6), ids!(statrow.s7), ids!(statrow.s8),
+        ids!(statrow.s0),
+        ids!(statrow.s1),
+        ids!(statrow.s2),
+        ids!(statrow.s3),
+        ids!(statrow.s4),
+        ids!(statrow.s5),
+        ids!(statrow.s6),
+        ids!(statrow.s7),
+        ids!(statrow.s8),
     ];
     for (i, sp) in spaths.iter().enumerate() {
         let tile = hp.widget(cx, *sp);
@@ -43,7 +87,11 @@ pub fn sync_home(app: &mut App, cx: &mut Cx) {
             continue;
         }
         let (k, v, sub) = &stats[i];
-        let kk = if sub.is_empty() { caps(k) } else { format!("{} · {}", caps(k), sub) };
+        let kk = if sub.is_empty() {
+            caps(k)
+        } else {
+            format!("{} · {}", caps(k), sub)
+        };
         set_label(cx, &tile, ids!(k), &kk, l);
         set_label(cx, &tile, ids!(v), v, l);
         let mut bg = tile.clone();
@@ -52,35 +100,88 @@ pub fn sync_home(app: &mut App, cx: &mut Cx) {
     // --------------------------------------------------------------- hero --
     let hero = hp.widget(cx, ids!(hero));
     if !hero.is_empty() {
-        let live = st.runs.iter().find(|r| r.state == RunState::Running).or_else(|| st.runs.iter().find(|r| r.state == RunState::Paused));
+        let live = st
+            .runs
+            .iter()
+            .find(|r| r.state == RunState::Running)
+            .or_else(|| st.runs.iter().find(|r| r.state == RunState::Paused));
         set_label(cx, &hero, ids!(head.cap), &caps(&tt("Training session")), l);
-        set_btn(cx, &hero, ids!(head.open), &tt("open →"), true, false, true, l);
+        set_btn(
+            cx,
+            &hero,
+            ids!(head.open),
+            &tt("open →"),
+            true,
+            false,
+            true,
+            l,
+        );
+        for p in [
+            ids!(bits),
+            ids!(goal_chart),
+            ids!(hsegs),
+            ids!(hseg_note),
+            ids!(rew_spark),
+            ids!(rew_note),
+            ids!(htiles),
+        ] {
+            hero.widget(cx, p).set_visible(cx, live.is_some());
+        }
         match live {
             Some(r) => {
-                let goal = r.snapshot.cfg.get(r.stage).map(|c| c.stance).unwrap_or(0.62);
-                let gap = st.live.now - goal;
+                let mut display = st.live.clone();
+                if !st.demo {
+                    display.hist_full = r.metrics.iter().map(|s| s.reward).collect();
+                    display.hist = r.metrics.iter().rev().take(120).map(|s| s.reward).collect();
+                    display.hist.reverse();
+                    display.reward = r.metrics.last().map(|s| s.reward).unwrap_or(0.0);
+                    display.falls = r.metrics.last().map(|s| s.fall_rate * 100.0).unwrap_or(0.0);
+                    display.falls_unmeasured = r
+                        .metrics
+                        .last()
+                        .map(|s| s.fall_rate_unmeasured)
+                        .unwrap_or(true);
+                    display.sps = r.metrics.last().map(|s| s.steps_per_sec).unwrap_or(0.0);
+                }
+                let goal = r
+                    .snapshot
+                    .cfg
+                    .get(r.stage)
+                    .map(|c| c.stance)
+                    .unwrap_or(0.62);
+                let gap = display.now - goal;
                 // A real run's headline is the training curve, not the stance
                 // demo: best/current reward and the iteration budget.
-                let best = st.live.hist_full.iter().cloned().fold(f64::MIN, f64::max);
-                let bits: [(String, String); 4] = if st.live.real {
+                let best = display.hist_full.iter().cloned().fold(f64::MIN, f64::max);
+                let bits: [(String, String); 4] = if display.real {
                     [
                         (tt("policy"), r.name.clone()),
                         (
                             "best".to_string(),
-                            if best > f64::MIN { format!("{best:.4}") } else { "—".into() },
+                            if best > f64::MIN {
+                                format!("{best:.4}")
+                            } else {
+                                "—".into()
+                            },
                         ),
-                        (tt("now"), format!("{:.4}", st.live.reward)),
+                        (tt("now"), format!("{:.4}", display.reward)),
                         ("iter".to_string(), format!("{}/{}", r.iter, r.iters_per)),
                     ]
                 } else {
                     [
                         (tt("policy"), r.name.clone()),
                         (tt("goal"), format!("{goal:.2} m")),
-                        (tt("now"), format!("{:.3} m", st.live.now)),
-                        (tt("gap"), format!("{}{:.3}", if gap >= 0.0 { "+" } else { "−" }, gap.abs())),
+                        (tt("now"), format!("{:.3} m", display.now)),
+                        (
+                            tt("gap"),
+                            format!("{}{:.3}", if gap >= 0.0 { "+" } else { "−" }, gap.abs()),
+                        ),
                     ]
                 };
-                for (i, bp) in [ids!(bits.b0), ids!(bits.b1), ids!(bits.b2), ids!(bits.b3)].iter().enumerate() {
+                for (i, bp) in [ids!(bits.b0), ids!(bits.b1), ids!(bits.b2), ids!(bits.b3)]
+                    .iter()
+                    .enumerate()
+                {
                     let b = hero.widget(cx, *bp);
                     if b.is_empty() {
                         continue;
@@ -88,36 +189,88 @@ pub fn sync_home(app: &mut App, cx: &mut Cx) {
                     set_label(cx, &b, ids!(k), &caps(&bits[i].0), l);
                     set_label(cx, &b, ids!(v), &bits[i].1, l);
                 }
-                if st.live.real {
-                    hero.spark(cx, ids!(goal_chart)).set(cx, &st.live.hist_full, None, 1, l);
+                if display.real {
+                    hero.spark(cx, ids!(goal_chart))
+                        .set(cx, &display.hist_full, None, 1, l);
                 } else {
-                    hero.spark(cx, ids!(goal_chart)).set(cx, &st.live.now_hist, Some(goal), 1, l);
+                    hero.spark(cx, ids!(goal_chart))
+                        .set(cx, &display.now_hist, Some(goal), 1, l);
                 }
                 {
-                    let note = if st.live.real { tt("reward · whole run") } else { tt("stance · actual chasing target") };
+                    let note = if display.real {
+                        tt("reward · saved intervals")
+                    } else {
+                        tt("stance · actual chasing target")
+                    };
                     set_label(cx, &hero, ids!(goal_note), &note, l);
                 }
                 let mut segs: Vec<(f64, SegTone)> = vec![];
                 for i in 0..r.stages.len() {
-                    segs.push((1.0, if i < r.stage { SegTone::Ok } else if i == r.stage { SegTone::Vio } else { SegTone::Sink }));
+                    segs.push((
+                        1.0,
+                        if i < r.stage {
+                            SegTone::Ok
+                        } else if i == r.stage {
+                            SegTone::Vio
+                        } else {
+                            SegTone::Sink
+                        },
+                    ));
                 }
                 hero.segsbar(cx, ids!(hsegs)).set(cx, segs, l);
-                let seg_note = tf("stage {0}/{1} · round {2}/6 · iter {3}/{4}", &[
-                    &(r.stage + 1).to_string(),
-                    &r.stages.len().to_string(),
-                    &r.round.to_string(),
-                    &r.iter.to_string(),
-                    &r.iters_per.to_string(),
-                ]);
+                let seg_note = tf(
+                    "stage {0}/{1} · round {2}/6 · iter {3}/{4}",
+                    &[
+                        &(r.stage + 1).to_string(),
+                        &r.stages.len().to_string(),
+                        &r.round.to_string(),
+                        &r.iter.to_string(),
+                        &r.iters_per.to_string(),
+                    ],
+                );
+                let seg_note = if r.snapshot.backend.as_deref() == Some("external") {
+                    format!(
+                        "{} · iteration {}/{}",
+                        r.stages.first().map(String::as_str).unwrap_or("robot task"),
+                        r.iter,
+                        r.iters_per
+                    )
+                } else {
+                    seg_note
+                };
                 set_label(cx, &hero, ids!(hseg_note), &seg_note, l);
-                hero.spark(cx, ids!(rew_spark)).set(cx, &st.live.hist, None, 0, l);
-                set_label(cx, &hero, ids!(rew_note), &tt("reward · last 90 intervals"), l);
+                hero.spark(cx, ids!(rew_spark))
+                    .set(cx, &display.hist, None, 0, l);
+                set_label(
+                    cx,
+                    &hero,
+                    ids!(rew_note),
+                    &tt("reward · recent intervals"),
+                    l,
+                );
                 let hvals = [
-                    (tt("reward"), format!("{:.4}", st.live.reward)),
-                    (tt("falls"), format!("{:.1}%", st.live.falls)),
-                    ("steps/s".to_string(), if st.live.real { format!("{:.0}", st.live.sps) } else { "3,151".to_string() }),
+                    (tt("reward"), format!("{:.4}", display.reward)),
+                    (
+                        tt("falls"),
+                        if display.falls_unmeasured {
+                            "not measured".into()
+                        } else {
+                            format!("{:.1}%", display.falls)
+                        },
+                    ),
+                    (
+                        "steps/s".to_string(),
+                        if display.real {
+                            format!("{:.0}", display.sps)
+                        } else {
+                            "3,151".to_string()
+                        },
+                    ),
                 ];
-                for (i, tp) in [ids!(htiles.h0), ids!(htiles.h1), ids!(htiles.h2)].iter().enumerate() {
+                for (i, tp) in [ids!(htiles.h0), ids!(htiles.h1), ids!(htiles.h2)]
+                    .iter()
+                    .enumerate()
+                {
                     let tile = hero.widget(cx, *tp);
                     if tile.is_empty() {
                         continue;
@@ -129,18 +282,59 @@ pub fn sync_home(app: &mut App, cx: &mut Cx) {
                 }
             }
             None => {
-                set_label(cx, &hero, ids!(goal_note), &tt("Nothing running. Launch from a scene set — Scenes → Train this set."), l);
+                set_label(
+                    cx,
+                    &hero,
+                    ids!(goal_note),
+                    &tt("Nothing running. Launch from a scene set — Scenes → Train this set."),
+                    l,
+                );
             }
         }
         let mut bg = hero.clone();
         script_apply_eval!(cx, bg, { draw_bg +: { light: #(l as f64) } });
     }
     // -------------------------------------------------------------- cards --
-    sync_card_rows(app, cx, ids!(cards.colA.card_runs), &tt("Recent runs"), "runs", l);
-    sync_card_rows(app, cx, ids!(cards.colA.card_sets), &tt("Scene sets"), "sets", l);
-    sync_card_rows(app, cx, ids!(cards.colB.card_robots), &tt("Robots"), "robots", l);
-    sync_card_rows(app, cx, ids!(cards.colB.card_val), &tt("Validation"), "val", l);
-    sync_card_rows(app, cx, ids!(cards.colC.card_deps), &tt("Deployments"), "deps", l);
+    sync_card_rows(
+        app,
+        cx,
+        ids!(cards.colA.card_runs),
+        &tt("Recent runs"),
+        "runs",
+        l,
+    );
+    sync_card_rows(
+        app,
+        cx,
+        ids!(cards.colA.card_sets),
+        &tt("Scene sets"),
+        "sets",
+        l,
+    );
+    sync_card_rows(
+        app,
+        cx,
+        ids!(cards.colB.card_robots),
+        &tt("Robots"),
+        "robots",
+        l,
+    );
+    sync_card_rows(
+        app,
+        cx,
+        ids!(cards.colB.card_val),
+        &tt("Validation"),
+        "val",
+        l,
+    );
+    sync_card_rows(
+        app,
+        cx,
+        ids!(cards.colC.card_deps),
+        &tt("Deployments"),
+        "deps",
+        l,
+    );
 }
 
 fn sync_card_rows(app: &mut App, cx: &mut Cx, path: &[LiveId], title: &str, kind: &str, l: f32) {
@@ -153,7 +347,16 @@ fn sync_card_rows(app: &mut App, cx: &mut Cx, path: &[LiveId], title: &str, kind
         return;
     }
     set_label(cx, &card, ids!(head.cap), &caps(title), l);
-    set_btn(cx, &card, ids!(head.open), &tt("open →"), true, false, true, l);
+    set_btn(
+        cx,
+        &card,
+        ids!(head.open),
+        &tt("open →"),
+        true,
+        false,
+        true,
+        l,
+    );
     let rpaths = [ids!(row0), ids!(row1), ids!(row2), ids!(row3)];
     let mut rows: Vec<(String, String, Option<(String, f64)>, bool)> = vec![];
     let mut fracs: Vec<f64> = vec![];
@@ -171,7 +374,12 @@ fn sync_card_rows(app: &mut App, cx: &mut Cx, path: &[LiveId], title: &str, kind
                     _ => 2.0,
                 };
                 fracs.push(r.steps / mx);
-                rows.push((r.name.clone(), format!("{:.2}M", r.steps), Some((tt(r.state.key()), tone)), false));
+                rows.push((
+                    r.name.clone(),
+                    format!("{:.2}M", r.steps),
+                    Some((tt(r.state.key()), tone)),
+                    false,
+                ));
             }
             extra = Some(tt("bar = env-steps relative to the largest run"));
         }
@@ -181,10 +389,19 @@ fn sync_card_rows(app: &mut App, cx: &mut Cx, path: &[LiveId], title: &str, kind
                     .members
                     .iter()
                     .take(4)
-                    .map(|id| st.scene(id).map(|sc| format!("{} {:.2}", sc.name, sc.stance)).unwrap_or_else(|| tt("deleted")))
+                    .map(|id| {
+                        st.scene(id)
+                            .map(|sc| format!("{} {:.2}", sc.name, sc.stance))
+                            .unwrap_or_else(|| tt("deleted"))
+                    })
                     .collect::<Vec<_>>()
                     .join(" · ");
-                rows.push((s.name.clone(), tf("{0} scenes", &[&s.members.len().to_string()]), None, false));
+                rows.push((
+                    s.name.clone(),
+                    tf("{0} scenes", &[&s.members.len().to_string()]),
+                    None,
+                    false,
+                ));
                 if extra.is_none() {
                     extra = Some(members);
                 }
@@ -192,9 +409,16 @@ fn sync_card_rows(app: &mut App, cx: &mut Cx, path: &[LiveId], title: &str, kind
         }
         "robots" => {
             for r in st.robots.iter().take(4) {
-                rows.push((r.name.clone(), tf("{0} dof", &[&r.movable.to_string()]), Some((tt("validated"), 1.0)), false));
+                rows.push((
+                    r.name.clone(),
+                    tf("{0} dof", &[&r.movable.to_string()]),
+                    Some((tt("imported"), 1.0)),
+                    false,
+                ));
             }
-            extra = Some(tt("import gate: parse · assets · structure · rehearse · map"));
+            extra = Some(tt(
+                "URDF library · training and physics need a matching robot task",
+            ));
         }
         "val" => {
             let s = match st.sweep_state {
@@ -203,7 +427,11 @@ fn sync_card_rows(app: &mut App, cx: &mut Cx, path: &[LiveId], title: &str, kind
                 SweepState::Aborted => tf("aborted {0}/40", &[&st.sweep_at.to_string()]),
                 SweepState::Complete => tf("{0}% of cells pass", &[&st.sweep_pass().to_string()]),
             };
-            extra = Some(format!("{s} · {}", tt("sim-to-sim gap 11%")));
+            extra = Some(if st.demo {
+                format!("{s} · {}", tt("sim-to-sim gap 11%"))
+            } else {
+                format!("{s} · Open Validate for measured robot trials.")
+            });
             heat = st.sweep_grid.is_some();
         }
         "deps" => {
@@ -214,10 +442,17 @@ fn sync_card_rows(app: &mut App, cx: &mut Cx, path: &[LiveId], title: &str, kind
                     DepState::RolledBack => 2.0,
                     _ => 4.0,
                 };
-                rows.push((d.name.clone(), format!("{} → {}", d.pname, d.target), Some((tt(d.state.key()), tone)), false));
+                rows.push((
+                    d.name.clone(),
+                    format!("{} → {}", d.pname, d.target),
+                    Some((tt(d.state.key()), tone)),
+                    false,
+                ));
             }
             if rows.is_empty() {
-                extra = Some(tt("no deployments yet — the Deploy tab gates the path to hardware"));
+                extra = Some(tt(
+                    "Hardware deployment is unavailable; target configuration can be saved.",
+                ));
             }
         }
         _ => {}
@@ -260,7 +495,14 @@ fn sync_card_rows(app: &mut App, cx: &mut Cx, path: &[LiveId], title: &str, kind
     if !hw.is_empty() {
         hw.set_visible(cx, heat);
         if heat {
-            card.heat(cx, ids!(mini_heatw.mini_heat)).set(cx, app.st.sweep_grid.as_ref(), app.st.sweep_at, None, l, true);
+            card.heat(cx, ids!(mini_heatw.mini_heat)).set(
+                cx,
+                app.st.sweep_grid.as_ref(),
+                app.st.sweep_at,
+                None,
+                l,
+                true,
+            );
         }
     }
     let mut bg = card.clone();
@@ -275,7 +517,11 @@ pub fn route_home(app: &mut App, cx: &mut Cx, actions: &Actions) {
     if hp.is_empty() {
         return;
     }
-    if hp.widget(cx, ids!(hero)).button(cx, ids!(head.open)).clicked(actions) {
+    if hp
+        .widget(cx, ids!(hero))
+        .button(cx, ids!(head.open))
+        .clicked(actions)
+    {
         app.st.mode = Mode::Train;
         app.sync_all(cx);
         return;
@@ -297,28 +543,36 @@ pub fn route_home(app: &mut App, cx: &mut Cx, actions: &Actions) {
             app.sync_all(cx);
             return;
         }
-        for (i, rp) in [ids!(row0), ids!(row1), ids!(row2), ids!(row3)].iter().enumerate() {
+        for (i, rp) in [ids!(row0), ids!(row1), ids!(row2), ids!(row3)]
+            .iter()
+            .enumerate()
+        {
             let uid = card.widget(cx, *rp).widget_uid();
             if view_clicked(actions, uid) {
                 match kind {
                     "runs" => {
                         if let Some(r) = app.st.runs.iter().filter(|r| !r.archived).nth(i) {
-                            app.st.sel.run = Some(r.id.clone());
+                            let id = r.id.clone();
                             app.st.mode = Mode::Runs;
+                            app.dispatch_l(cx, &LAct::SelRun(id));
                         }
                     }
                     "sets" => {
                         if let Some(s) = app.st.sets.get(i) {
                             app.st.sel.set = Some(s.id.clone());
-                            if let Some(first) = s.members.iter().find(|m| app.st.scene(m).is_some()) {
-                                app.st.sel.scene = Some(first.clone());
+                            if let Some(first) =
+                                s.members.iter().find(|m| app.st.scene(m).is_some())
+                            {
+                                let id = first.clone();
+                                app.st.sel_scene(&id);
                             }
                             app.st.mode = Mode::Scenes;
                         }
                     }
                     "robots" => {
                         if let Some(r) = app.st.robots.get(i) {
-                            app.st.sel.robot = Some(r.id.clone());
+                            let id = r.id.clone();
+                            app.dispatch_l(cx, &LAct::SelRobot(id));
                             app.st.mode = Mode::Robots;
                         }
                     }

@@ -1,0 +1,8 @@
+torch==2.9.1
+mujoco==3.10.0
+numpy==2.4.1
+rsl-rl-lib==5.0.1
+tensordict==0.10.0
+onnx==1.22.0
+onnxruntime==1.24.4
+tensorboard==2.20.0

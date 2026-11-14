@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "revision": 1,
+  "name": "Microduck \u00b7 official flat velocity task",
+  "kind": "microduck",
+  "robot": "Microduck",
+  "model": "model selected in Studio",
+  "ppo": {
+    "num_envs": 32,
+    "iterations": 50000,
+    "steps_per_env": 24,
+    "learning_rate": 0.001,
+    "epochs": 5,
+    "minibatches": 4,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "entropy": 0.01,
+    "clip": 0.2,
+    "hidden": [
+      512,
+      256,
+      128
+    ],
+    "device": "mps",
+    "checkpoint_every": 250
+  },
+  "simulation": {
+    "timestep": 0.005,
+    "decimation": 4,
+    "episode_seconds": 20.0,
+    "spawn_height": 0.0,
+    "fixed_base": false,
+    "friction": 1.0,
+    "min_height": 0.0,
+    "max_tilt_degrees": 70.0
+  },
+  "commands": {
+    "forward": [
+      -0.4,
+      0.4
+    ],
+    "lateral": [
+      -0.3,
+      0.3
+    ],
+    "yaw": [
+      -1.0,
+      1.0
+    ]
+  },
+  "observations": [
+    {
+      "name": "base_ang_vel",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "projected_gravity",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "joint_pos",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "joint_vel",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "actions",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "command",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "head_command",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "body_command",
+      "enabled": true,
+      "scale": 1.0
+    }
+  ],
+  "rewards": [
+    {
+      "name": "track_linear_velocity",
+      "weight": 2.0
+    },
+    {
+      "name": "track_angular_velocity",
+      "weight": 2.0
+    },
+    {
+      "name": "upright",
+      "weight": 2.0
+    },
+    {
+      "name": "pose",
+      "weight": 1.0
+    },
+    {
+      "name": "body_ang_vel",
+      "weight": -0.05
+    },
+    {
+      "name": "angular_momentum",
+      "weight": -0.02
+    },
+    {
+      "name": "dof_pos_limits",
+      "weight": -1.0
+    },
+    {
+      "name": "action_rate_l2",
+      "weight": -0.1
+    },
+    {
+      "name": "air_time",
+      "weight": 3.0
+    },
+    {
+      "name": "foot_clearance",
+      "weight": -2.0
+    },
+    {
+      "name": "foot_swing_height",
+      "weight": -0.25
+    },
+    {
+      "name": "foot_slip",
+      "weight": -0.1
+    },
+    {
+      "name": "self_collisions",
+      "weight": -1.0
+    },
+    {
+      "name": "head_pose_tracking",
+      "weight": 2.0
+    },
+    {
+      "name": "body_pose_tracking",
+      "weight": 0.0
+    },
+    {
+      "name": "head_pose_bias",
+      "weight": 0.0
+    }
+  ],
+  "actuators": [
+    {
+      "joint": "left_hip_yaw",
+      "action_index": 0,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "left_hip_roll",
+      "action_index": 1,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "left_hip_pitch",
+      "action_index": 2,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "left_knee",
+      "action_index": 3,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "left_ankle",
+      "action_index": 4,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "neck_pitch",
+      "action_index": 5,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "head_pitch",
+      "action_index": 6,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "head_yaw",
+      "action_index": 7,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "head_roll",
+      "action_index": 8,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "right_hip_yaw",
+      "action_index": 9,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "right_hip_roll",
+      "action_index": 10,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "right_hip_pitch",
+      "action_index": 11,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "right_knee",
+      "action_index": 12,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    },
+    {
+      "joint": "right_ankle",
+      "action_index": 13,
+      "direction": 1.0,
+      "scale": 1.0,
+      "offset": 0.0,
+      "kp": 200.0,
+      "kd": 0.0,
+      "effort": 0.0,
+      "velocity": 0.0
+    }
+  ],
+  "options": {
+    "curriculum": "upstream"
+  }
+}

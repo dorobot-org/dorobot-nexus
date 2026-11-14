@@ -1,0 +1,324 @@
+<mujoco model="adora_nano">
+  <compiler angle="radian" />
+  <asset>
+    <mesh name="base_link_c1" content_type="model/stl" file="meshes/collision/base_link_c1.stl" />
+    <mesh name="base_link_c2" content_type="model/stl" file="meshes/collision/base_link_c2.stl" />
+    <mesh name="base_link_c3" content_type="model/stl" file="meshes/collision/base_link_c3.stl" />
+    <mesh name="base_link_c4" content_type="model/stl" file="meshes/collision/base_link_c4.stl" />
+    <mesh name="base_link_c5" content_type="model/stl" file="meshes/collision/base_link_c5.stl" />
+    <mesh name="base_link_c6" content_type="model/stl" file="meshes/collision/base_link_c6.stl" />
+    <mesh name="base_link_c7" content_type="model/stl" file="meshes/collision/base_link_c7.stl" />
+    <mesh name="base_link_c8" content_type="model/stl" file="meshes/collision/base_link_c8.stl" />
+    <mesh name="wheel_1_c1" content_type="model/stl" file="meshes/collision/wheel_1_c1.stl" />
+    <mesh name="wheel_2_c1" content_type="model/stl" file="meshes/collision/wheel_2_c1.stl" />
+    <mesh name="wheel_3_c1" content_type="model/stl" file="meshes/collision/wheel_3_c1.stl" />
+    <mesh name="head_mount_c1" content_type="model/stl" file="meshes/collision/head_mount_c1.stl" />
+    <mesh name="head_mount_c2" content_type="model/stl" file="meshes/collision/head_mount_c2.stl" />
+    <mesh name="head_mount_c3" content_type="model/stl" file="meshes/collision/head_mount_c3.stl" />
+    <mesh name="head_mount_c4" content_type="model/stl" file="meshes/collision/head_mount_c4.stl" />
+    <mesh name="head_pan_c1" content_type="model/stl" file="meshes/collision/head_pan_c1.stl" />
+    <mesh name="head_pan_c2" content_type="model/stl" file="meshes/collision/head_pan_c2.stl" />
+    <mesh name="head_pan_c3" content_type="model/stl" file="meshes/collision/head_pan_c3.stl" />
+    <mesh name="head_tilt_c1" content_type="model/stl" file="meshes/collision/head_tilt_c1.stl" />
+    <mesh name="head_tilt_c2" content_type="model/stl" file="meshes/collision/head_tilt_c2.stl" />
+    <mesh name="head_tilt_c3" content_type="model/stl" file="meshes/collision/head_tilt_c3.stl" />
+    <mesh name="left_shoulder_cad_update_c1" content_type="model/stl" file="meshes/collision/left_shoulder_cad_update_c1.stl" />
+    <mesh name="left_shoulder_cad_update_c2" content_type="model/stl" file="meshes/collision/left_shoulder_cad_update_c2.stl" />
+    <mesh name="left_shoulder_cad_update_c3" content_type="model/stl" file="meshes/collision/left_shoulder_cad_update_c3.stl" />
+    <mesh name="left_shoulder_cad_update_c4" content_type="model/stl" file="meshes/collision/left_shoulder_cad_update_c4.stl" />
+    <mesh name="left_shoulder_cad_update_c5" content_type="model/stl" file="meshes/collision/left_shoulder_cad_update_c5.stl" />
+    <mesh name="left_shoulder_cad_update_c6" content_type="model/stl" file="meshes/collision/left_shoulder_cad_update_c6.stl" />
+    <mesh name="left_shoulder_cad_update_c7" content_type="model/stl" file="meshes/collision/left_shoulder_cad_update_c7.stl" />
+    <mesh name="left_shoulder_cad_update_c8" content_type="model/stl" file="meshes/collision/left_shoulder_cad_update_c8.stl" />
+    <mesh name="left_upper_arm_cad_update_c1" content_type="model/stl" file="meshes/collision/left_upper_arm_cad_update_c1.stl" />
+    <mesh name="left_upper_arm_cad_update_c2" content_type="model/stl" file="meshes/collision/left_upper_arm_cad_update_c2.stl" />
+    <mesh name="left_upper_arm_cad_update_c3" content_type="model/stl" file="meshes/collision/left_upper_arm_cad_update_c3.stl" />
+    <mesh name="left_upper_arm_cad_update_c4" content_type="model/stl" file="meshes/collision/left_upper_arm_cad_update_c4.stl" />
+    <mesh name="left_upper_arm_cad_update_c5" content_type="model/stl" file="meshes/collision/left_upper_arm_cad_update_c5.stl" />
+    <mesh name="left_upper_arm_cad_update_c6" content_type="model/stl" file="meshes/collision/left_upper_arm_cad_update_c6.stl" />
+    <mesh name="left_upper_arm_cad_update_c7" content_type="model/stl" file="meshes/collision/left_upper_arm_cad_update_c7.stl" />
+    <mesh name="left_upper_arm_cad_update_c8" content_type="model/stl" file="meshes/collision/left_upper_arm_cad_update_c8.stl" />
+    <mesh name="left_forearm_c1" content_type="model/stl" file="meshes/collision/left_forearm_c1.stl" />
+    <mesh name="left_forearm_c2" content_type="model/stl" file="meshes/collision/left_forearm_c2.stl" />
+    <mesh name="left_forearm_c3" content_type="model/stl" file="meshes/collision/left_forearm_c3.stl" />
+    <mesh name="left_forearm_c4" content_type="model/stl" file="meshes/collision/left_forearm_c4.stl" />
+    <mesh name="left_wrist_pitch_c1" content_type="model/stl" file="meshes/collision/left_wrist_pitch_c1.stl" />
+    <mesh name="left_wrist_pitch_c2" content_type="model/stl" file="meshes/collision/left_wrist_pitch_c2.stl" />
+    <mesh name="left_wrist_pitch_c3" content_type="model/stl" file="meshes/collision/left_wrist_pitch_c3.stl" />
+    <mesh name="left_wrist_pitch_c4" content_type="model/stl" file="meshes/collision/left_wrist_pitch_c4.stl" />
+    <mesh name="left_wrist_roll_cad_update_c1" content_type="model/stl" file="meshes/collision/left_wrist_roll_cad_update_c1.stl" />
+    <mesh name="left_wrist_roll_cad_update_c2" content_type="model/stl" file="meshes/collision/left_wrist_roll_cad_update_c2.stl" />
+    <mesh name="left_wrist_roll_cad_update_c3" content_type="model/stl" file="meshes/collision/left_wrist_roll_cad_update_c3.stl" />
+    <mesh name="left_wrist_roll_cad_update_c4" content_type="model/stl" file="meshes/collision/left_wrist_roll_cad_update_c4.stl" />
+    <mesh name="left_wrist_roll_cad_update_c5" content_type="model/stl" file="meshes/collision/left_wrist_roll_cad_update_c5.stl" />
+    <mesh name="left_wrist_roll_cad_update_c6" content_type="model/stl" file="meshes/collision/left_wrist_roll_cad_update_c6.stl" />
+    <mesh name="left_wrist_roll_cad_update_c7" content_type="model/stl" file="meshes/collision/left_wrist_roll_cad_update_c7.stl" />
+    <mesh name="left_wrist_roll_cad_update_c8" content_type="model/stl" file="meshes/collision/left_wrist_roll_cad_update_c8.stl" />
+    <mesh name="left_wrist_housing_cad_update_c1" content_type="model/stl" file="meshes/collision/left_wrist_housing_cad_update_c1.stl" />
+    <mesh name="left_wrist_housing_cad_update_c2" content_type="model/stl" file="meshes/collision/left_wrist_housing_cad_update_c2.stl" />
+    <mesh name="left_wrist_housing_cad_update_c3" content_type="model/stl" file="meshes/collision/left_wrist_housing_cad_update_c3.stl" />
+    <mesh name="left_wrist_housing_cad_update_c4" content_type="model/stl" file="meshes/collision/left_wrist_housing_cad_update_c4.stl" />
+    <mesh name="left_wrist_housing_cad_update_c5" content_type="model/stl" file="meshes/collision/left_wrist_housing_cad_update_c5.stl" />
+    <mesh name="left_wrist_housing_cad_update_c6" content_type="model/stl" file="meshes/collision/left_wrist_housing_cad_update_c6.stl" />
+    <mesh name="left_wrist_housing_cad_update_c7" content_type="model/stl" file="meshes/collision/left_wrist_housing_cad_update_c7.stl" />
+    <mesh name="left_wrist_housing_cad_update_c8" content_type="model/stl" file="meshes/collision/left_wrist_housing_cad_update_c8.stl" />
+    <mesh name="left_wrist_cam_c1" content_type="model/stl" file="meshes/collision/left_wrist_cam_c1.stl" />
+    <mesh name="left_wrist_cam_c2" content_type="model/stl" file="meshes/collision/left_wrist_cam_c2.stl" />
+    <mesh name="right_shoulder_cad_update_c1" content_type="model/stl" file="meshes/collision/right_shoulder_cad_update_c1.stl" />
+    <mesh name="right_shoulder_cad_update_c2" content_type="model/stl" file="meshes/collision/right_shoulder_cad_update_c2.stl" />
+    <mesh name="right_shoulder_cad_update_c3" content_type="model/stl" file="meshes/collision/right_shoulder_cad_update_c3.stl" />
+    <mesh name="right_shoulder_cad_update_c4" content_type="model/stl" file="meshes/collision/right_shoulder_cad_update_c4.stl" />
+    <mesh name="right_shoulder_cad_update_c5" content_type="model/stl" file="meshes/collision/right_shoulder_cad_update_c5.stl" />
+    <mesh name="right_shoulder_cad_update_c6" content_type="model/stl" file="meshes/collision/right_shoulder_cad_update_c6.stl" />
+    <mesh name="right_shoulder_cad_update_c7" content_type="model/stl" file="meshes/collision/right_shoulder_cad_update_c7.stl" />
+    <mesh name="right_shoulder_cad_update_c8" content_type="model/stl" file="meshes/collision/right_shoulder_cad_update_c8.stl" />
+    <mesh name="right_upper_arm_cad_update_c1" content_type="model/stl" file="meshes/collision/right_upper_arm_cad_update_c1.stl" />
+    <mesh name="right_upper_arm_cad_update_c2" content_type="model/stl" file="meshes/collision/right_upper_arm_cad_update_c2.stl" />
+    <mesh name="right_upper_arm_cad_update_c3" content_type="model/stl" file="meshes/collision/right_upper_arm_cad_update_c3.stl" />
+    <mesh name="right_upper_arm_cad_update_c4" content_type="model/stl" file="meshes/collision/right_upper_arm_cad_update_c4.stl" />
+    <mesh name="right_upper_arm_cad_update_c5" content_type="model/stl" file="meshes/collision/right_upper_arm_cad_update_c5.stl" />
+    <mesh name="right_upper_arm_cad_update_c6" content_type="model/stl" file="meshes/collision/right_upper_arm_cad_update_c6.stl" />
+    <mesh name="right_upper_arm_cad_update_c7" content_type="model/stl" file="meshes/collision/right_upper_arm_cad_update_c7.stl" />
+    <mesh name="right_upper_arm_cad_update_c8" content_type="model/stl" file="meshes/collision/right_upper_arm_cad_update_c8.stl" />
+    <mesh name="right_forearm_c1" content_type="model/stl" file="meshes/collision/right_forearm_c1.stl" />
+    <mesh name="right_forearm_c2" content_type="model/stl" file="meshes/collision/right_forearm_c2.stl" />
+    <mesh name="right_forearm_c3" content_type="model/stl" file="meshes/collision/right_forearm_c3.stl" />
+    <mesh name="right_forearm_c4" content_type="model/stl" file="meshes/collision/right_forearm_c4.stl" />
+    <mesh name="right_wrist_pitch_c1" content_type="model/stl" file="meshes/collision/right_wrist_pitch_c1.stl" />
+    <mesh name="right_wrist_pitch_c2" content_type="model/stl" file="meshes/collision/right_wrist_pitch_c2.stl" />
+    <mesh name="right_wrist_pitch_c3" content_type="model/stl" file="meshes/collision/right_wrist_pitch_c3.stl" />
+    <mesh name="right_wrist_pitch_c4" content_type="model/stl" file="meshes/collision/right_wrist_pitch_c4.stl" />
+    <mesh name="right_wrist_roll_cad_update_c1" content_type="model/stl" file="meshes/collision/right_wrist_roll_cad_update_c1.stl" />
+    <mesh name="right_wrist_roll_cad_update_c2" content_type="model/stl" file="meshes/collision/right_wrist_roll_cad_update_c2.stl" />
+    <mesh name="right_wrist_roll_cad_update_c3" content_type="model/stl" file="meshes/collision/right_wrist_roll_cad_update_c3.stl" />
+    <mesh name="right_wrist_roll_cad_update_c4" content_type="model/stl" file="meshes/collision/right_wrist_roll_cad_update_c4.stl" />
+    <mesh name="right_wrist_roll_cad_update_c5" content_type="model/stl" file="meshes/collision/right_wrist_roll_cad_update_c5.stl" />
+    <mesh name="right_wrist_roll_cad_update_c6" content_type="model/stl" file="meshes/collision/right_wrist_roll_cad_update_c6.stl" />
+    <mesh name="right_wrist_roll_cad_update_c7" content_type="model/stl" file="meshes/collision/right_wrist_roll_cad_update_c7.stl" />
+    <mesh name="right_wrist_roll_cad_update_c8" content_type="model/stl" file="meshes/collision/right_wrist_roll_cad_update_c8.stl" />
+    <mesh name="right_wrist_housing_cad_update_c1" content_type="model/stl" file="meshes/collision/right_wrist_housing_cad_update_c1.stl" />
+    <mesh name="right_wrist_housing_cad_update_c2" content_type="model/stl" file="meshes/collision/right_wrist_housing_cad_update_c2.stl" />
+    <mesh name="right_wrist_housing_cad_update_c3" content_type="model/stl" file="meshes/collision/right_wrist_housing_cad_update_c3.stl" />
+    <mesh name="right_wrist_housing_cad_update_c4" content_type="model/stl" file="meshes/collision/right_wrist_housing_cad_update_c4.stl" />
+    <mesh name="right_wrist_housing_cad_update_c5" content_type="model/stl" file="meshes/collision/right_wrist_housing_cad_update_c5.stl" />
+    <mesh name="right_wrist_housing_cad_update_c6" content_type="model/stl" file="meshes/collision/right_wrist_housing_cad_update_c6.stl" />
+    <mesh name="right_wrist_housing_cad_update_c7" content_type="model/stl" file="meshes/collision/right_wrist_housing_cad_update_c7.stl" />
+    <mesh name="right_wrist_housing_cad_update_c8" content_type="model/stl" file="meshes/collision/right_wrist_housing_cad_update_c8.stl" />
+    <mesh name="right_wrist_cam_c1" content_type="model/stl" file="meshes/collision/right_wrist_cam_c1.stl" />
+    <mesh name="right_wrist_cam_c2" content_type="model/stl" file="meshes/collision/right_wrist_cam_c2.stl" />
+    <mesh name="left_finger_a_c1" content_type="model/stl" file="meshes/collision/left_finger_a_c1.stl" />
+    <mesh name="left_finger_b_c1" content_type="model/stl" file="meshes/collision/left_finger_b_c1.stl" />
+    <mesh name="right_finger_a_c1" content_type="model/stl" file="meshes/collision/right_finger_a_c1.stl" />
+    <mesh name="right_finger_b_c1" content_type="model/stl" file="meshes/collision/right_finger_b_c1.stl" />
+  </asset>
+  <worldbody>
+    <body name="base_link">
+      <freejoint name="floating_base" />
+      <inertial pos="-0.00482 -0.004363 0.124638" quat="0.6193 0.62999 -0.319739 0.342559" mass="5.98769" diaginertia="0.172611 0.157427 0.110449" />
+      <geom pos="-3.46945e-17 6.74916e-18 -6.245e-16" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="base_link_c1" />
+      <geom pos="5.27356e-16 -1.2481e-17 -1.83187e-15" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="base_link_c2" />
+      <geom pos="4.57967e-16 -6.245e-17 -1.60982e-15" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="base_link_c3" />
+      <geom type="mesh" rgba="0.72 0.73 0.76 1" mesh="base_link_c4" />
+      <geom pos="1.02696e-15 6.66134e-16 -1.21431e-16" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="base_link_c5" />
+      <geom pos="6.66134e-16 -3.79471e-18 -2.35922e-16" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="base_link_c6" />
+      <geom pos="-7.77156e-16 1.29823e-17 -1.19349e-15" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="base_link_c7" />
+      <geom pos="3.88578e-16 2.35922e-16 -1.02696e-15" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="base_link_c8" />
+      <body name="wheel_1" pos="-0.16322 0 0.01671" quat="0.707107 0 -0.707107 0">
+        <inertial pos="-9e-06 0 -0.00205" quat="0.500007 0.500007 -0.499993 0.499993" mass="0.159622" diaginertia="0.000253401 0.000149892 0.000149875" />
+        <joint name="wheel_1_joint" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" limited="false" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.07 0.07 0.08 1" mesh="wheel_1_c1" />
+      </body>
+      <body name="wheel_2" pos="0.08161 0.14136 0.01671" quat="0.353553 -0.612372 -0.353553 -0.612372">
+        <inertial pos="-1e-05 4e-06 -0.002056" quat="0.5 0.5 -0.5 0.5" mass="0.159622" diaginertia="0.000253401 0.000149892 0.000149875" />
+        <joint name="wheel_2_joint" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" limited="false" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.07 0.07 0.08 1" mesh="wheel_2_c1" />
+      </body>
+      <body name="wheel_3" pos="0.08161 -0.14136 0.01671" quat="0.353553 0.612372 -0.353553 0.612372">
+        <inertial pos="-1e-05 -4e-06 -0.002056" quat="0.5 0.5 -0.5 0.5" mass="0.159622" diaginertia="0.000253401 0.000149892 0.000149875" />
+        <joint name="wheel_3_joint" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" limited="false" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.07 0.07 0.08 1" mesh="wheel_3_c1" />
+      </body>
+      <body name="head_mount" pos="0.075 0 0.3724">
+        <inertial pos="-1e-05 0.003855 -0.060051" quat="0.999309 -0.0369667 0.00324491 -0.00228478" mass="0.321822" diaginertia="0.00115799 0.00103565 0.000404956" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_mount_c1" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_mount_c2" />
+        <geom pos="-1.17961e-16 8.91509e-18 9.15934e-16" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_mount_c3" />
+        <geom pos="1.17961e-16 7.91356e-18 9.15934e-16" quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_mount_c4" />
+        <body name="head_pan">
+          <inertial pos="-0.001433 -0.000303 0.024895" quat="0.211833 0.689649 0.309436 0.619484" mass="0.09208" diaginertia="2.9744e-05 2.88399e-05 2.39831e-05" />
+          <joint name="head_pan_joint" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+          <geom quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_pan_c1" />
+          <geom quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_pan_c2" />
+          <geom quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_pan_c3" />
+          <body name="head_tilt" pos="0.0125 0 0.0287" quat="0.570107 -0.570107 -0.418304 -0.418304">
+            <inertial pos="0.031331 -0.009218 0.000296" quat="0.693419 -0.00203138 -0.00289611 0.720526" mass="0.072641" diaginertia="9.04397e-05 7.30055e-05 5.08659e-05" />
+            <joint name="head_tilt_joint" range="-0.698132 2.0944" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+            <geom quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_tilt_c1" />
+            <geom quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_tilt_c2" />
+            <geom quat="1 0 0 0" type="mesh" rgba="0.72 0.73 0.76 1" mesh="head_tilt_c3" />
+          </body>
+        </body>
+      </body>
+      <body name="left_shoulder" pos="0.1111 0.23 0.26615" quat="-2.31896e-08 0.999333 -0.0365209 8.47472e-10">
+        <inertial pos="-0.041103 0.000636 0.008058" quat="0.607296 0.287297 0.359851 0.647425" mass="0.316664" diaginertia="0.000392504 0.000345596 0.000293569" />
+        <geom pos="3.95517e-16 -3.81639e-17 -4.51028e-16" quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="left_shoulder_cad_update_c1" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="left_shoulder_cad_update_c2" />
+        <geom pos="3.26128e-16 -2.64545e-17 1.17961e-16" quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="left_shoulder_cad_update_c3" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="left_shoulder_cad_update_c4" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="left_shoulder_cad_update_c5" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="left_shoulder_cad_update_c6" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="left_shoulder_cad_update_c7" />
+        <geom pos="2.56739e-16 5.72459e-17 -2.81893e-18" quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="left_shoulder_cad_update_c8" />
+        <body name="left_upper_arm">
+          <inertial pos="0.05423 -0.004119 -0.021681" quat="0.672025 0.291569 0.272817 0.623651" mass="0.159904" diaginertia="0.000628921 0.000535425 0.000159294" />
+          <joint name="left_j1_yaw" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+          <geom type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_upper_arm_cad_update_c1" />
+          <geom pos="-1.80411e-16 1.34441e-17 3.19189e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_upper_arm_cad_update_c2" />
+          <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_upper_arm_cad_update_c3" />
+          <geom pos="-2.56739e-16 2.81893e-17 2.56739e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_upper_arm_cad_update_c4" />
+          <geom pos="-2.91434e-16 2.68882e-17 -2.35922e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_upper_arm_cad_update_c5" />
+          <geom pos="-1.25767e-17 1.51788e-18 -2.81025e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_upper_arm_cad_update_c6" />
+          <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_upper_arm_cad_update_c7" />
+          <geom pos="-2.56739e-16 6.28837e-18 2.91434e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_upper_arm_cad_update_c8" />
+          <body name="left_forearm" pos="0.0415107 0 -0.07155" quat="-0.0598946 -0.111163 -0.698314 0.704566">
+            <inertial pos="0.098403 -0.015126 0.003102" quat="0.539184 0.478887 0.520452 0.457249" mass="0.156565" diaginertia="0.000416287 0.000412894 9.13079e-05" />
+            <joint name="left_j2_pitch" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+            <geom pos="-4.30211e-16 5.20417e-17 -2.0383e-17" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_forearm_c1" />
+            <geom pos="-7.21645e-16 1.35525e-20 -1.11022e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_forearm_c2" />
+            <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_forearm_c3" />
+            <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_forearm_c4" />
+            <body name="left_wrist_pitch" pos="0.136499 0 2.5e-05" quat="0.121037 0 0 0.992648">
+              <inertial pos="0.103019 -1.4e-05 0.003185" quat="0.501585 0.503379 0.495119 0.499879" mass="0.147015" diaginertia="0.000468872 0.000434172 5.53196e-05" />
+              <joint name="left_j3_pitch" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+              <geom pos="-4.30211e-16 -4.48927e-18 -1.60462e-17" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_pitch_c1" />
+              <geom pos="-8.32667e-16 3.99207e-18 -1.04083e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_pitch_c2" />
+              <geom pos="-3.67761e-16 6.07153e-17 -1.66533e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_pitch_c3" />
+              <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_pitch_c4" />
+              <body name="left_wrist_roll" pos="0.1571 0 -2.5e-05">
+                <inertial pos="0.037286 0.000166 -0.003603" quat="0.328404 0.626112 0.626967 0.32718" mass="0.119929" diaginertia="0.000104763 6.79657e-05 5.18991e-05" />
+                <joint name="left_j4_pitch" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+                <geom type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_roll_cad_update_c1" />
+                <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_roll_cad_update_c2" />
+                <geom pos="-2.35922e-16 -6.50521e-18 -3.05311e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_roll_cad_update_c3" />
+                <geom pos="-2.56739e-16 -2.86229e-17 5.89806e-17" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_roll_cad_update_c4" />
+                <geom pos="-3.05311e-16 2.94903e-17 -2.84495e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_roll_cad_update_c5" />
+                <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_roll_cad_update_c6" />
+                <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_roll_cad_update_c7" />
+                <geom pos="4.33681e-17 3.81639e-17 -2.63678e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_roll_cad_update_c8" />
+                <body name="left_wrist_housing" pos="0.0504 0 0.003" quat="0.083749 0.70213 -0.083749 -0.70213">
+                  <inertial pos="-0.002691 0.000501 -0.041087" quat="0.0630672 0.736331 -0.0666634 0.670369" mass="0.14092" diaginertia="9.8702e-05 9.46219e-05 5.62791e-05" />
+                  <joint name="left_j5_roll" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+                  <geom pos="1.66533e-16 -9.19403e-17 4.02456e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_housing_cad_update_c1" />
+                  <geom pos="-9.02056e-17 -7.45931e-17 2.63678e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_housing_cad_update_c2" />
+                  <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_housing_cad_update_c3" />
+                  <geom pos="-2.81893e-18 -9.71445e-17 2.42861e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_housing_cad_update_c4" />
+                  <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_housing_cad_update_c5" />
+                  <geom pos="4.85723e-17 6.93889e-17 2.63678e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_housing_cad_update_c6" />
+                  <geom pos="-9.88792e-17 1.52656e-16 3.05311e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_housing_cad_update_c7" />
+                  <geom pos="-5.37764e-17 1.56125e-17 2.98372e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="left_wrist_housing_cad_update_c8" />
+                  <body name="left_tool_mount" pos="0.0128608 0 -0.0368" quat="-0.421218 -0.54299 -0.452948 0.567957">
+                    <inertial pos="0 0 0" mass="0.02" diaginertia="2e-06 2e-06 2e-06" />
+                  </body>
+                  <body name="left_wrist_cam" pos="-0.0004747 0.068236 -0.0070972" quat="0.437261 0.5557 0.437261 -0.5557">
+                    <inertial pos="0.040891 0.001511 -0.006122" quat="0.706857 0.0187834 0.0187834 0.706857" mass="0.036521" diaginertia="2.6359e-05 2.38291e-05 1.45709e-05" />
+                    <geom type="mesh" rgba="0.1 0.11 0.13 1" mesh="left_wrist_cam_c1" />
+                    <geom type="mesh" rgba="0.1 0.11 0.13 1" mesh="left_wrist_cam_c2" />
+                  </body>
+                  <body name="left_finger_a" pos="-0.0130432 -0.00172368 -0.124988">
+                    <inertial pos="-0.010256 0.008295 0.037644" quat="0.707107 0 0 0.707107" mass="0.012258" diaginertia="5.457e-06 5.153e-06 1.933e-06" />
+                    <geom type="mesh" rgba="0.03 0.03 0.03 1" mesh="left_finger_a_c1" />
+                  </body>
+                  <body name="left_finger_b" pos="0.00956977 -0.0137233 -0.0368103">
+                    <inertial pos="0.037328 0.003409 -0.038797" quat="0.707107 0 0 0.707107" mass="0.012258" diaginertia="6.018e-06 4.946e-06 2.667e-06" />
+                    <joint name="left_j6_gripper" range="-0.3 0.8771" actuatorfrcrange="-1 1" damping="0.341835" frictionloss="0.02" axis="0.235211 0.971944 -1.97001e-10" />
+                    <geom type="mesh" rgba="0.03 0.03 0.03 1" mesh="left_finger_b_c1" />
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="right_shoulder" pos="0.1111 -0.23 0.26615" quat="-2.31896e-08 0.999333 -0.0365209 8.47472e-10">
+        <inertial pos="-0.041103 0.000636 0.008058" quat="0.607296 0.287297 0.359851 0.647425" mass="0.316664" diaginertia="0.000392504 0.000345596 0.000293569" />
+        <geom pos="3.95517e-16 -3.81639e-17 -4.51028e-16" quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="right_shoulder_cad_update_c1" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="right_shoulder_cad_update_c2" />
+        <geom pos="3.26128e-16 -2.64545e-17 1.17961e-16" quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="right_shoulder_cad_update_c3" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="right_shoulder_cad_update_c4" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="right_shoulder_cad_update_c5" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="right_shoulder_cad_update_c6" />
+        <geom quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="right_shoulder_cad_update_c7" />
+        <geom pos="2.56739e-16 5.72459e-17 -2.81893e-18" quat="1 0 0 0" type="mesh" rgba="0.17 0.17 0.19 1" mesh="right_shoulder_cad_update_c8" />
+        <body name="right_upper_arm">
+          <inertial pos="0.05423 -0.004119 -0.021681" quat="0.672025 0.291569 0.272817 0.623651" mass="0.159904" diaginertia="0.000628921 0.000535425 0.000159294" />
+          <joint name="right_j1_yaw" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+          <geom type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_upper_arm_cad_update_c1" />
+          <geom pos="-1.80411e-16 1.34441e-17 3.19189e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_upper_arm_cad_update_c2" />
+          <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_upper_arm_cad_update_c3" />
+          <geom pos="-2.56739e-16 2.81893e-17 2.56739e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_upper_arm_cad_update_c4" />
+          <geom pos="-2.91434e-16 2.68882e-17 -2.35922e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_upper_arm_cad_update_c5" />
+          <geom pos="-1.25767e-17 1.51788e-18 -2.81025e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_upper_arm_cad_update_c6" />
+          <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_upper_arm_cad_update_c7" />
+          <geom pos="-2.56739e-16 6.28837e-18 2.91434e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_upper_arm_cad_update_c8" />
+          <body name="right_forearm" pos="0.0415107 0 -0.07155" quat="-0.0598946 -0.111163 -0.698314 0.704566">
+            <inertial pos="0.098403 -0.015126 0.003102" quat="0.539184 0.478887 0.520452 0.457249" mass="0.156565" diaginertia="0.000416287 0.000412894 9.13079e-05" />
+            <joint name="right_j2_pitch" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+            <geom pos="-4.30211e-16 5.20417e-17 -2.0383e-17" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_forearm_c1" />
+            <geom pos="-7.21645e-16 1.35525e-20 -1.11022e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_forearm_c2" />
+            <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_forearm_c3" />
+            <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_forearm_c4" />
+            <body name="right_wrist_pitch" pos="0.136499 0 2.5e-05" quat="0.121037 0 0 0.992648">
+              <inertial pos="0.103019 -1.4e-05 0.003185" quat="0.501585 0.503379 0.495119 0.499879" mass="0.147015" diaginertia="0.000468872 0.000434172 5.53196e-05" />
+              <joint name="right_j3_pitch" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+              <geom pos="-4.30211e-16 -4.48927e-18 -1.60462e-17" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_pitch_c1" />
+              <geom pos="-8.32667e-16 3.99207e-18 -1.04083e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_pitch_c2" />
+              <geom pos="-3.67761e-16 6.07153e-17 -1.66533e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_pitch_c3" />
+              <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_pitch_c4" />
+              <body name="right_wrist_roll" pos="0.1571 0 -2.5e-05">
+                <inertial pos="0.037286 0.000166 -0.003603" quat="0.328404 0.626112 0.626967 0.32718" mass="0.119929" diaginertia="0.000104763 6.79657e-05 5.18991e-05" />
+                <joint name="right_j4_pitch" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+                <geom type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_roll_cad_update_c1" />
+                <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_roll_cad_update_c2" />
+                <geom pos="-2.35922e-16 -6.50521e-18 -3.05311e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_roll_cad_update_c3" />
+                <geom pos="-2.56739e-16 -2.86229e-17 5.89806e-17" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_roll_cad_update_c4" />
+                <geom pos="-3.05311e-16 2.94903e-17 -2.84495e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_roll_cad_update_c5" />
+                <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_roll_cad_update_c6" />
+                <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_roll_cad_update_c7" />
+                <geom pos="4.33681e-17 3.81639e-17 -2.63678e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_roll_cad_update_c8" />
+                <body name="right_wrist_housing" pos="0.0504 0 0.003" quat="0.083749 0.70213 -0.083749 -0.70213">
+                  <inertial pos="-0.002691 0.000501 -0.041087" quat="0.0630672 0.736331 -0.0666634 0.670369" mass="0.14092" diaginertia="9.8702e-05 9.46219e-05 5.62791e-05" />
+                  <joint name="right_j5_roll" range="-2.61799 2.61799" actuatorfrcrange="-1.86 1.86" damping="0.341835" frictionloss="0.02" />
+                  <geom pos="1.66533e-16 -9.19403e-17 4.02456e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_housing_cad_update_c1" />
+                  <geom pos="-9.02056e-17 -7.45931e-17 2.63678e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_housing_cad_update_c2" />
+                  <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_housing_cad_update_c3" />
+                  <geom pos="-2.81893e-18 -9.71445e-17 2.42861e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_housing_cad_update_c4" />
+                  <geom quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_housing_cad_update_c5" />
+                  <geom pos="4.85723e-17 6.93889e-17 2.63678e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_housing_cad_update_c6" />
+                  <geom pos="-9.88792e-17 1.52656e-16 3.05311e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_housing_cad_update_c7" />
+                  <geom pos="-5.37764e-17 1.56125e-17 2.98372e-16" quat="1 0 0 0" type="mesh" rgba="0.62 0.64 0.68 1" mesh="right_wrist_housing_cad_update_c8" />
+                  <body name="right_tool_mount" pos="0.0128608 0 -0.0368" quat="-0.421224 -0.542994 -0.452943 0.567953">
+                    <inertial pos="0 0 0" mass="0.02" diaginertia="2e-06 2e-06 2e-06" />
+                  </body>
+                  <body name="right_wrist_cam" pos="-0.0004398 0.0682262 -0.0072078" quat="0.437261 0.5557 0.437261 -0.5557">
+                    <inertial pos="0.04078 0.001475 -0.006123" quat="0.706857 0.0187834 0.0187834 0.706857" mass="0.036521" diaginertia="2.6359e-05 2.38291e-05 1.45709e-05" />
+                    <geom quat="1 0 0 0" type="mesh" rgba="0.1 0.11 0.13 1" mesh="right_wrist_cam_c1" />
+                    <geom quat="1 0 0 0" type="mesh" rgba="0.1 0.11 0.13 1" mesh="right_wrist_cam_c2" />
+                  </body>
+                  <body name="right_finger_a" pos="-0.0130432 -0.00172368 -0.124988">
+                    <inertial pos="-0.010256 0.008295 0.037644" quat="0.707107 0 0 0.707107" mass="0.012258" diaginertia="5.457e-06 5.153e-06 1.933e-06" />
+                    <geom type="mesh" rgba="0.03 0.03 0.03 1" mesh="right_finger_a_c1" />
+                  </body>
+                  <body name="right_finger_b" pos="0.00956977 -0.0137233 -0.0368103">
+                    <inertial pos="0.037328 0.003409 -0.038797" quat="0.707107 0 0 0.707107" mass="0.012258" diaginertia="6.018e-06 4.946e-06 2.667e-06" />
+                    <joint name="right_j6_gripper" range="-0.3 0.8771" actuatorfrcrange="-1 1" damping="0.341835" frictionloss="0.02" axis="0.235211 0.971944 -1.97001e-10" />
+                    <geom type="mesh" rgba="0.03 0.03 0.03 1" mesh="right_finger_b_c1" />
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

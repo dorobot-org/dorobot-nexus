@@ -40,3 +40,5 @@ pub mod trainer;
 /// decides whether a console *prefers* this backend, not whether it exists.
 #[allow(dead_code)]
 pub mod zealot;
+
+pub mod external;

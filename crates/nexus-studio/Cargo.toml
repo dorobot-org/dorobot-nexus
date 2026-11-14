@@ -21,7 +21,14 @@ makepad-plot = { path = "../makepad-plot" }
 dorobot-ux = { workspace = true }
 makepad-urdf-player = { workspace = true }
 rfd = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+urdf-rs = "0.9"
+roxmltree = "0.20"
+sha2 = "0.10"
+shell-words = "1.1"
 objc = "0.2"
 
 [features]
+default = ["zealot"]
 zealot = ["nexus-engine/zealot"]

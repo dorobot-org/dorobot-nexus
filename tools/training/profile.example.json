@@ -1,0 +1,8 @@
+{
+  "robot": "Replace with imported robot name",
+  "program": "/absolute/path/to/training-environment/bin/python",
+  "args": ["-u", "/absolute/path/to/robot_trainer_wrapper.py", "--run-dir", "{run_dir}", "--seed", "{seed}"],
+  "cwd": "/absolute/path/to/trainer-checkout",
+  "checkpoint": "{run_dir}/policy.pt",
+  "env": {}
+}

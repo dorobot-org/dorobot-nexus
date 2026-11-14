@@ -95,7 +95,10 @@ impl Scene {
             ("BIPED_FRICTION", fmt(self.friction)),
             ("BIPED_KP_SCALE", fmt(self.kp_scale)),
             ("BIPED_MASS_DR", fmt(self.mass_dr)),
-            ("BIPED_SPAWN_DR", if self.spawn_dr { "1" } else { "0" }.into()),
+            (
+                "BIPED_SPAWN_DR",
+                if self.spawn_dr { "1" } else { "0" }.into(),
+            ),
             ("BIPED_DRIVE_SEED", self.seed.to_string()),
             ("BIPED_BASE_HEIGHT", fmt(self.base_height)),
         ];
@@ -138,18 +141,29 @@ impl Scene {
 
     /// A one-line description for a list row.
     pub fn summary(&self) -> String {
-        let terrain = if self.terrain.is_empty() { "flat" } else { &self.terrain };
+        let terrain = if self.terrain.is_empty() {
+            "flat"
+        } else {
+            &self.terrain
+        };
         format!(
             "{terrain} · {:.0}s · vx {:.2} · fric {:.2} · kp {:.2}{}",
             self.seconds,
             self.vx,
             self.friction,
             self.kp_scale,
-            if self.push_vel > 0.0 { " · pushed" } else { "" }
+            if self.push_vel > 0.0 {
+                " · pushed"
+            } else {
+                ""
+            }
         ) + &if self.terrain.is_empty() {
             String::new()
         } else {
-            format!(" · amp {:.1} · {:.0}°", self.terrain_amp, self.terrain_slope_deg)
+            format!(
+                " · amp {:.1} · {:.0}°",
+                self.terrain_amp, self.terrain_slope_deg
+            )
         }
     }
 
@@ -208,7 +222,9 @@ impl Scene {
         let dir = root();
         std::fs::create_dir_all(&dir)?;
         let p = self.path();
-        std::fs::write(&p, self.to_json())?;
+        let temp = p.with_extension(format!("json.{}.tmp", std::process::id()));
+        std::fs::write(&temp, self.to_json())?;
+        std::fs::rename(&temp, &p)?;
         Ok(p)
     }
 
@@ -322,7 +338,11 @@ impl Recording {
 fn fmt(v: f32) -> String {
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() || s == "-" { "0".into() } else { s.into() }
+    if s.is_empty() || s == "-" {
+        "0".into()
+    } else {
+        s.into()
+    }
 }
 
 fn quote(s: &str) -> String {
@@ -334,7 +354,13 @@ fn quote(s: &str) -> String {
 pub fn slug(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let s = s.trim_matches('-').to_string();
     let mut out = String::with_capacity(s.len());
@@ -350,7 +376,11 @@ pub fn slug(name: &str) -> String {
             prev_dash = false;
         }
     }
-    if out.is_empty() { "scene".into() } else { out }
+    if out.is_empty() {
+        "scene".into()
+    } else {
+        out
+    }
 }
 
 fn field_start(text: &str, key: &str) -> Option<usize> {
@@ -439,7 +469,12 @@ mod tests {
         let keys: Vec<&str> = k.iter().map(|(a, _)| *a).collect();
         // Every physics knob is written, not left to zealot's default: two
         // scenes must not be able to differ only in what they omit.
-        for want in ["BIPED_FRICTION", "BIPED_KP_SCALE", "BIPED_MASS_DR", "BIPED_SPAWN_DR"] {
+        for want in [
+            "BIPED_FRICTION",
+            "BIPED_KP_SCALE",
+            "BIPED_MASS_DR",
+            "BIPED_SPAWN_DR",
+        ] {
             assert!(keys.contains(&want), "missing {want}");
         }
         // Flat ground turns terrain off rather than leaving it unset.
@@ -448,7 +483,10 @@ mod tests {
 
     #[test]
     fn a_terrain_scene_names_its_family() {
-        let s = Scene { terrain: "step".into(), ..Scene::default() };
+        let s = Scene {
+            terrain: "step".into(),
+            ..Scene::default()
+        };
         let k = s.knobs();
         assert!(k.contains(&("BIPED_TERRAIN", "1".to_string())));
         assert!(k.contains(&("BIPED_TERRAIN_FAMILY", "step".to_string())));
@@ -456,10 +494,22 @@ mod tests {
 
     #[test]
     fn a_terrain_variant_gets_its_own_mesh_identity() {
-        let a = Scene { terrain: "rough".into(), ..Scene::default() };
-        let b = Scene { terrain_amp: 2.5, ..a.clone() };
-        let c = Scene { terrain_slope_deg: 10.0, ..a.clone() };
-        let d = Scene { seed: 99, ..a.clone() };
+        let a = Scene {
+            terrain: "rough".into(),
+            ..Scene::default()
+        };
+        let b = Scene {
+            terrain_amp: 2.5,
+            ..a.clone()
+        };
+        let c = Scene {
+            terrain_slope_deg: 10.0,
+            ..a.clone()
+        };
+        let d = Scene {
+            seed: 99,
+            ..a.clone()
+        };
         // Amplitude, slope and seed all change the geometry, so all must
         // change the filename — otherwise the renderer serves one variant's
         // ground under another's simulation.

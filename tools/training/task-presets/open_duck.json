@@ -1,0 +1,284 @@
+{
+  "version": 1,
+  "revision": 1,
+  "name": "Open Duck Mini v2 \u00b7 joystick task",
+  "kind": "open_duck",
+  "robot": "Open Duck Mini v2",
+  "model": "model selected in Studio",
+  "ppo": {
+    "num_envs": 32,
+    "iterations": 1000,
+    "steps_per_env": 24,
+    "learning_rate": 0.0003,
+    "epochs": 5,
+    "minibatches": 4,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "entropy": 0.01,
+    "clip": 0.2,
+    "hidden": [
+      256,
+      256,
+      128
+    ],
+    "device": "mps",
+    "checkpoint_every": 100
+  },
+  "simulation": {
+    "timestep": 0.002,
+    "decimation": 10,
+    "episode_seconds": 20.0,
+    "spawn_height": 0.0,
+    "fixed_base": false,
+    "friction": 1.0,
+    "min_height": 0.0,
+    "max_tilt_degrees": 90.0
+  },
+  "commands": {
+    "forward": [
+      -0.15,
+      0.15
+    ],
+    "lateral": [
+      -0.2,
+      0.2
+    ],
+    "yaw": [
+      -1.0,
+      1.0
+    ]
+  },
+  "observations": [
+    {
+      "name": "angular_velocity",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "accelerometer",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "command",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "joint_position",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "joint_velocity",
+      "enabled": true,
+      "scale": 0.05
+    },
+    {
+      "name": "action_history",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "targets",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "contacts",
+      "enabled": true,
+      "scale": 1.0
+    },
+    {
+      "name": "phase",
+      "enabled": true,
+      "scale": 1.0
+    }
+  ],
+  "rewards": [
+    {
+      "name": "track_linear_velocity",
+      "weight": 2.5
+    },
+    {
+      "name": "track_angular_velocity",
+      "weight": 6.0
+    },
+    {
+      "name": "torque_l2",
+      "weight": -0.001
+    },
+    {
+      "name": "action_rate_l2",
+      "weight": -0.5
+    },
+    {
+      "name": "alive",
+      "weight": 20.0
+    },
+    {
+      "name": "stand_still",
+      "weight": -0.2
+    },
+    {
+      "name": "imitation",
+      "weight": 1.0
+    }
+  ],
+  "actuators": [
+    {
+      "joint": "left_hip_yaw",
+      "action_index": 0,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "left_hip_roll",
+      "action_index": 1,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "left_hip_pitch",
+      "action_index": 2,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "left_knee",
+      "action_index": 3,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "left_ankle",
+      "action_index": 4,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "neck_pitch",
+      "action_index": 5,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "head_pitch",
+      "action_index": 6,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "head_yaw",
+      "action_index": 7,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "head_roll",
+      "action_index": 8,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "right_hip_yaw",
+      "action_index": 9,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "right_hip_roll",
+      "action_index": 10,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "right_hip_pitch",
+      "action_index": 11,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "right_knee",
+      "action_index": 12,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    },
+    {
+      "joint": "right_ankle",
+      "action_index": 13,
+      "direction": 1.0,
+      "scale": 0.25,
+      "offset": 0.0,
+      "kp": 13.37,
+      "kd": 0.0,
+      "effort": 3.23,
+      "velocity": 5.24
+    }
+  ]
+}

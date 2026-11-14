@@ -2,17 +2,36 @@
 //! Eight workspaces, factory-industrial theme, EN/中文, light/dark.
 
 pub mod actions;
+pub mod artifacts;
+pub mod deployment;
 pub mod drive;
-pub mod nexus;
+pub mod evaluation;
+pub mod external_motion;
 pub mod i18n;
+pub mod jobs;
+pub mod nexus;
+pub mod policy_export;
+pub mod preferences;
+pub mod review;
+pub mod robot_assets;
+pub mod robot_bundle;
+pub mod robot_import;
 pub mod screens;
+pub mod simulation;
 pub mod state;
+pub mod task_config;
+pub mod task_editor;
+pub mod workspace;
 /// Tokens and the widget kit moved to the shared `dorobot-ux` crate, which
 /// dorobot-studio draws with too. Re-exported under their old paths so the
 /// screens keep referring to `crate::tokens` / `crate::kit` unchanged.
 pub use dorobot_ux::{kit, tokens};
 
+use crate::deployment::State as DeploymentState;
+use crate::evaluation::State as EvaluationState;
+use crate::external_motion::State as ExternalMotionState;
 use crate::i18n::{tr, trf};
+use crate::review::State as ReviewState;
 use crate::screens::{LSpec, RSpec};
 use crate::state::*;
 use crate::tokens::pal;
@@ -33,6 +52,13 @@ mod shell {
 }
 
 fn main() {
+    if let Some(path) = std::env::args().skip_while(|s| s != "--job-worker").nth(1) {
+        if let Err(error) = crate::jobs::worker(std::path::Path::new(&path)) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     // Never returns if a headless flag was given.
     nexus_engine::cli::maybe_headless();
     shell::app_main();
@@ -50,7 +76,7 @@ script_mod! {
         flow: Down
         visible: false
         grp := mod.widgets.nx.Grp{ visible: false }
-        row := mod.widgets.nx.NxRow{ visible: false }
+        row := mod.widgets.screens.Row{visible:false}
         acts := View{
             width: Fill height: Fit
             visible: false
@@ -114,7 +140,7 @@ script_mod! {
                         // ------------------------------------------ chrome --
                         modes := View{
                             width: Fill height: Fit
-                            flow: Right
+                            flow: Flow.Right{wrap: true}
                             align: Align{y: 0.5}
                             spacing: 2.0
                             padding: Inset{left: 10. right: 12. top: 2. bottom: 0.}
@@ -136,7 +162,6 @@ script_mod! {
                             tab5 := ModeTab{}
                             tab6 := ModeTab{}
                             tab7 := ModeTab{}
-                            Filler{}
                             c_state := mod.widgets.nx.ChipV{}
                             c_steps := mod.widgets.nx.ChipV{}
                             c_dep := mod.widgets.nx.ChipV{ visible: false }
@@ -160,7 +185,7 @@ script_mod! {
                                     flow: Right
                                     align: Align{y: 0.5}
                                     padding: Inset{left: 9. right: 7. top: 7. bottom: 3.}
-                                    cap := mod.widgets.nx.Cap{}
+                                    cap := mod.widgets.nx.Cap{width: Fill max_lines: 2 text_overflow: Ellipsis}
                                     Filler{}
                                     cap_btn := mod.widgets.nx.Mini{ visible: false }
                                 }
@@ -169,6 +194,13 @@ script_mod! {
                                     visible: false
                                     padding: Inset{left: 9. right: 7. top: 2. bottom: 2.}
                                     filter_in := TextInput{ width: Fill empty_text: "⌕ filter…" }
+                                }
+                                lp := View{
+                                    width: Fill height: Fit flow: Right visible: false
+                                    padding: 7.0 spacing: 5.0
+                                    prev := mod.widgets.nx.Mini{text:"←"}
+                                    label := mod.widgets.nx.BodyLbl{width: Fill max_lines:1}
+                                    next := mod.widgets.nx.Mini{text:"→"}
                                 }
                                 lslot0 := LSlot{} lslot1 := LSlot{} lslot2 := LSlot{} lslot3 := LSlot{}
                                 lslot4 := LSlot{} lslot5 := LSlot{} lslot6 := LSlot{} lslot7 := LSlot{}
@@ -219,6 +251,24 @@ script_mod! {
 
 #[derive(Script, ScriptHook)]
 pub struct App {
+    #[rust]
+    workspace_error: Option<String>,
+    #[rust]
+    workspace_session: Option<crate::workspace::Session>,
+    #[rust]
+    artifact_plan: Option<crate::artifacts::Plan>,
+    #[rust]
+    checkpoint_page: usize,
+    #[rust]
+    pub left_page: usize,
+    #[rust]
+    pub left_page_mode: Option<Mode>,
+    #[rust]
+    pub system_light: f32,
+    #[rust]
+    pub window_width: f64,
+    #[rust]
+    export_job: Option<crate::policy_export::Job>,
     #[live]
     ui: WidgetRef,
     #[rust]
@@ -259,6 +309,8 @@ pub struct App {
     #[rust]
     pub replay: Option<crate::nexus::Replay>,
     #[rust]
+    pub review: ReviewState,
+    #[rust]
     pub replay_map: Option<Vec<Option<usize>>>,
     #[rust]
     pub drive_ack: u64,
@@ -267,6 +319,10 @@ pub struct App {
     /// Samples already folded into `st.live` from the real training handle.
     #[rust]
     train_seen: usize,
+    #[rust]
+    replay_clock: Option<std::time::Instant>,
+    #[rust]
+    replay_phase: f64,
     /// Which terrain variant the 3D view currently shows (family|amp|slope|seed).
     #[rust]
     terrain_shown: String,
@@ -286,13 +342,25 @@ pub struct App {
     /// unchanged one does not re-drive.
     #[rust]
     preview_key: String,
+    #[rust]
+    pub external_motion: ExternalMotionState,
+    #[rust]
+    pub simulation: Option<crate::simulation::Session>,
+    #[rust]
+    pub evaluation: EvaluationState,
+    #[rust]
+    pub deployment: DeploymentState,
 }
 
 impl AppMain for App {
     fn script_mod(vm: &mut ScriptVm) -> ScriptValue {
         makepad_widgets::script_mod(vm);
         makepad_urdf_player::makepad_xr::script_mod(vm);
-        makepad_urdf_player::script_mod(vm);
+        // Nexus supplies its own joint controls. Register only the viewer;
+        // the unused upstream JointPanel has an invalid TextInput property.
+        makepad_urdf_player::render::draw::script_mod(vm);
+        makepad_urdf_player::render::draw::composite_shader::script_mod(vm);
+        makepad_urdf_player::robot_view::script_mod(vm);
         dorobot_ux::script_mod(vm);
         crate::screens::script_mod(vm);
         self::script_mod(vm)
@@ -325,11 +393,28 @@ impl AppMain for App {
         if self.replay_timer.is_event(event).is_some()
             && self.replay.is_some()
             && self.st.live.playing
-            && matches!(self.st.mode, Mode::Scenes | Mode::Inspect | Mode::Validate | Mode::Train)
+            && matches!(
+                self.st.mode,
+                Mode::Scenes | Mode::Inspect | Mode::Validate | Mode::Train
+            )
         {
-            self.st.live.frame = (self.st.live.frame + 1) % self.st.live.frames.max(1);
+            let now = std::time::Instant::now();
+            let elapsed = self
+                .replay_clock
+                .replace(now)
+                .map(|t| now.duration_since(t).as_secs_f64())
+                .unwrap_or(0.0);
+            let dt = self.replay.as_ref().map(|r| r.dt).unwrap_or(0.04);
+            self.replay_phase += elapsed;
+            let frames = (self.replay_phase / dt).floor() as u32;
+            self.replay_phase %= dt;
+            self.st.live.frame = (self.st.live.frame + frames) % self.st.live.frames.max(1);
             self.drive_replay(cx);
             self.ui.redraw(cx);
+        }
+        if !self.st.live.playing {
+            self.replay_clock = None;
+            self.replay_phase = 0.0;
         }
         self.match_event(cx, event);
         self.ui.handle_event(cx, event, &mut Scope::empty());
@@ -338,12 +423,27 @@ impl AppMain for App {
 
 impl MatchEvent for App {
     fn handle_startup(&mut self, cx: &mut Cx) {
+        if !self.st.demo {
+            match crate::workspace::Session::open_with_runs(
+                std::path::Path::new(&crate::nexus::repo_dir()),
+                &crate::artifacts::runs_root(),
+            ) {
+                Ok(session) => self.workspace_session = Some(session),
+                Err(e) => {
+                    self.workspace_error = Some(e.to_string());
+                    self.st.toast(e.to_string());
+                }
+            }
+        }
         self.fast_timer = cx.start_interval(0.12);
         self.slow_timer = cx.start_interval(1.1);
         // 25 Hz: the rate tools/lafan1_to_rollout.py resamples motion to, so a
         // recorded clip plays at 1.0x and one frame per tick keeps it smooth.
         self.replay_timer = cx.start_interval(0.04);
         self.st.merge_disk();
+        if self.workspace_session.is_some() {
+            self.refresh_artifacts();
+        }
         // Opt out of App Nap: backgrounded, macOS otherwise coalesces our
         // timers AND throttles our own threads (the waker included), parking
         // the app solid. This app legitimately works in the background — it
@@ -356,7 +456,9 @@ impl MatchEvent for App {
         // window is backgrounded (App Nap parks timers otherwise).
         std::thread::spawn(|| loop {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            let pending = std::fs::metadata(crate::drive::CMD_PATH).map(|m| m.len() > 0).unwrap_or(false);
+            let pending = std::fs::metadata(crate::drive::CMD_PATH)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false);
             let soak = std::path::Path::new("/tmp/nexus_soak_on").exists();
             if pending || soak {
                 SignalToUI::set_ui_signal();
@@ -370,7 +472,9 @@ impl MatchEvent for App {
                 }
             }
         });
-        self.st.modal = AppModal::Tour;
+        if self.st.demo {
+            self.st.modal = AppModal::Tour;
+        }
         self.sync_all(cx);
         // Launched as an observer: attach to the named run immediately and
         // land on Train, so the window opens onto the live curves instead of
@@ -392,6 +496,18 @@ impl MatchEvent for App {
     }
 
     fn handle_key_down(&mut self, cx: &mut Cx, e: &KeyEvent) {
+        if self.simulation.is_some() && self.st.modal == AppModal::None {
+            let action = match e.key_code {
+                KeyCode::ArrowRight => Some("sim-step"),
+                KeyCode::ArrowLeft => Some("sim-pause"),
+                KeyCode::Home => Some("sim-restart"),
+                _ => None,
+            };
+            if let Some(action) = action {
+                self.dispatch_named(cx, action, "");
+                return;
+            }
+        }
         match e.key_code {
             KeyCode::Escape => {
                 if self.st.modal != AppModal::None {
@@ -413,7 +529,8 @@ impl MatchEvent for App {
                 } else if matches!(self.st.mode, Mode::Scenes | Mode::Inspect) {
                     self.st.live.playing = false;
                     if fwd {
-                        self.st.live.frame = (self.st.live.frame + 3).min(self.st.live.frames.saturating_sub(1));
+                        self.st.live.frame =
+                            (self.st.live.frame + 3).min(self.st.live.frames.saturating_sub(1));
                     } else {
                         self.st.live.frame = self.st.live.frame.saturating_sub(3);
                     }
@@ -422,9 +539,15 @@ impl MatchEvent for App {
                 }
             }
             KeyCode::Home | KeyCode::End => {
-                if self.st.modal == AppModal::None && matches!(self.st.mode, Mode::Scenes | Mode::Inspect) {
+                if self.st.modal == AppModal::None
+                    && matches!(self.st.mode, Mode::Scenes | Mode::Inspect)
+                {
                     self.st.live.playing = false;
-                    self.st.live.frame = if e.key_code == KeyCode::Home { 0 } else { self.st.live.frames.saturating_sub(1) };
+                    self.st.live.frame = if e.key_code == KeyCode::Home {
+                        0
+                    } else {
+                        self.st.live.frames.saturating_sub(1)
+                    };
                     crate::screens::sync_stage_tl(self, cx);
                     self.ui.redraw(cx);
                 }
@@ -435,6 +558,15 @@ impl MatchEvent for App {
 }
 
 impl App {
+    pub fn can_edit(&mut self) -> bool {
+        if self.st.demo || self.workspace_session.is_some() {
+            true
+        } else {
+            self.st.toast(self.workspace_error.clone().unwrap_or_else(|| "Workspace is open read-only. Close the other Studio and reopen this window to edit.".into()));
+            false
+        }
+    }
+
     fn st_dirty_check(&mut self) -> bool {
         // Cheap: any handler that mutates sets this via toasts/mode/modal
         // changes; we just always re-sync after actions.
@@ -445,7 +577,7 @@ impl App {
         match self.st.theme {
             Theme::Dark => 0.0,
             Theme::Light => 1.0,
-            Theme::Auto => 0.0, // desktop default dark; OS query TODO
+            Theme::Auto => self.system_light,
         }
     }
 
@@ -459,9 +591,18 @@ impl App {
     // ------------------------------------------------------------- routing --
 
     fn route_chrome(&mut self, cx: &mut Cx, actions: &Actions) {
-        for (i, id) in [ids!(tab0), ids!(tab1), ids!(tab2), ids!(tab3), ids!(tab4), ids!(tab5), ids!(tab6), ids!(tab7)]
-            .into_iter()
-            .enumerate()
+        for (i, id) in [
+            ids!(tab0),
+            ids!(tab1),
+            ids!(tab2),
+            ids!(tab3),
+            ids!(tab4),
+            ids!(tab5),
+            ids!(tab6),
+            ids!(tab7),
+        ]
+        .into_iter()
+        .enumerate()
         {
             if self.ui.button(cx, id).clicked(actions) {
                 self.st.mode = MODES[i];
@@ -482,8 +623,7 @@ impl App {
             self.sync_all(cx);
         }
         if self.ui.button(cx, ids!(help_btn)).clicked(actions) {
-            self.st.modal = AppModal::Tour;
-            self.sync_all(cx);
+            self.dispatch_named(cx, "help", "");
         }
         if crate::screens::view_clicked(actions, self.ui.widget(cx, ids!(c_dep)).widget_uid()) {
             self.st.mode = Mode::Deploy;
@@ -506,7 +646,29 @@ impl App {
 
     // -------------------------------------------------------------- syncing --
 
+    fn save_workspace(&mut self) {
+        if self.st.demo {
+            return;
+        }
+        let Some(session) = &self.workspace_session else {
+            return;
+        };
+        match session.save(&self.st) {
+            Ok(()) => self.workspace_error = None,
+            Err(e) => {
+                let message = format!("Workspace could not be saved: {e}");
+                if self.workspace_error.as_ref() != Some(&message) {
+                    self.st.toast(message.clone());
+                }
+                self.workspace_error = Some(message);
+            }
+        }
+    }
+
     pub fn sync_all(&mut self, cx: &mut Cx) {
+        self.release_simulation_if_selection_changed();
+        self.st.sync_run_metrics();
+        self.save_workspace();
         let l = self.light();
         self.sync_chrome(cx, l);
         crate::screens::sync_mode_frame(self, cx);
@@ -518,11 +680,30 @@ impl App {
         crate::screens::sync_modal(self, cx);
         self.sync_terrain_view(cx);
         self.sync_mjcf_view(cx);
+        if self.replay.is_some() {
+            self.drive_replay(cx);
+        }
         self.ui.redraw(cx);
     }
 
     fn sync_fast(&mut self, cx: &mut Cx) {
-        let mut dirty = false;
+        let width = self.ui.view(cx, ids!(root_bg)).area().rect(cx).size.x;
+        if width > 0. && (self.window_width - width).abs() > 1. {
+            self.window_width = width;
+            self.sync_all(cx);
+        }
+        let appearance = crate::preferences::system_light();
+        if self.system_light != appearance {
+            self.system_light = appearance;
+            if self.st.theme == Theme::Auto {
+                self.sync_all(cx);
+            }
+        }
+        self.tick_queue();
+        let mut dirty = self.poll_policy_export();
+        dirty |= self.tick_simulation(cx);
+        dirty |= self.tick_evaluation(cx);
+        dirty |= self.tick_agent(cx);
         // real process output
         if self.drain_real_proc(cx) {
             dirty = true;
@@ -538,11 +719,23 @@ impl App {
         if self.tick_train_preview(cx) {
             dirty = true;
         }
+        if self.tick_external_motion(cx) {
+            self.review = Default::default();
+            crate::screens::sync_stage_tl(self, cx);
+            if self.st.mode == Mode::Validate {
+                crate::screens::sync_left_rail(self, cx);
+                crate::screens::sync_right_rail(self, cx);
+            }
+            dirty = true;
+        }
         // real rollout replay drives the 3D robot. Validate is in this list
         // because sim-to-sim delivers a rollout there: the scores say whether
         // the policy transferred, and watching it is how you see what "it
         // didn't" actually looked like. Train is here for the policy preview.
-        let plays = matches!(self.st.mode, Mode::Scenes | Mode::Inspect | Mode::Validate | Mode::Train);
+        let plays = matches!(
+            self.st.mode,
+            Mode::Scenes | Mode::Inspect | Mode::Validate | Mode::Train
+        );
         if self.replay.is_some() && self.st.live.playing && plays {
             self.drive_replay(cx);
             dirty = true;
@@ -551,6 +744,9 @@ impl App {
         if self.st.live.playing && plays {
             crate::screens::sync_transport_fast(self, cx);
             dirty = true;
+        }
+        if self.st.mode == Mode::Inspect && self.review.document.is_some() {
+            crate::screens::sync_right_rail(self, cx);
         }
         // sweep reveal
         if self.st.sweep_state == SweepState::Running {
@@ -578,6 +774,7 @@ impl App {
     }
 
     fn sync_slow(&mut self, cx: &mut Cx) {
+        self.save_workspace();
         let l = self.light();
         self.sync_chrome(cx, l);
         crate::screens::sync_stage_tl(self, cx);
@@ -601,9 +798,18 @@ impl App {
         if !root.is_empty() {
             script_apply_eval!(cx, root, { draw_bg +: { light: #(l as f64) } });
         }
-        for (i, id) in [ids!(tab0), ids!(tab1), ids!(tab2), ids!(tab3), ids!(tab4), ids!(tab5), ids!(tab6), ids!(tab7)]
-            .into_iter()
-            .enumerate()
+        for (i, id) in [
+            ids!(tab0),
+            ids!(tab1),
+            ids!(tab2),
+            ids!(tab3),
+            ids!(tab4),
+            ids!(tab5),
+            ids!(tab6),
+            ids!(tab7),
+        ]
+        .into_iter()
+        .enumerate()
         {
             let on = if MODES[i] == self.st.mode { 1.0 } else { 0.0 };
             let label = self.t(MODES[i].label());
@@ -619,32 +825,47 @@ impl App {
         }
         // chips
         let running = self.st.runs.iter().find(|r| r.state == RunState::Running);
+        let shown = running
+            .or_else(|| self.st.runs.iter().find(|r| r.state == RunState::Paused))
+            .or_else(|| self.st.sel.run.as_ref().and_then(|id| self.st.run(id)));
         let (state_txt, tone, pulse) = match running {
+            Some(r) if r.set == "robot training task" => {
+                (format!("training · iteration {}", r.iter), 0.0, true)
+            }
             Some(r) => (
-                self.tf("training · stage {0}/{1}", &[&(r.stage + 1).to_string(), &r.stages.len().to_string()]),
+                self.tf(
+                    "training · stage {0}/{1}",
+                    &[&(r.stage + 1).to_string(), &r.stages.len().to_string()],
+                ),
                 0.0,
                 true,
             ),
             None => {
-                let paused = self.st.runs.iter().any(|r| r.state == RunState::Paused);
-                if paused {
-                    (self.t("paused"), 0.5, true)
+                if let Some(r) = shown {
+                    (self.t(r.state.key()), 0.5, r.state == RunState::Paused)
                 } else {
                     (self.t("stopped"), 0.5, false)
                 }
             }
         };
-        let steps = self
-            .st
-            .runs
-            .iter()
-            .find(|r| r.state == RunState::Running)
-            .map(|r| r.steps)
-            .unwrap_or(2.10);
+        let steps = shown.map(|r| r.steps).unwrap_or(0.0);
         let steps_txt = self.tf("{0}M steps", &[&format!("{steps:.2}")]);
-        crate::screens::set_chip(cx, &self.ui, ids!(c_state), &state_txt, Some(tone), pulse, l);
+        crate::screens::set_chip(
+            cx,
+            &self.ui,
+            ids!(c_state),
+            &state_txt,
+            Some(tone),
+            pulse,
+            l,
+        );
         crate::screens::set_chip(cx, &self.ui, ids!(c_steps), &steps_txt, None, false, l);
-        let live_n = self.st.deploys.iter().filter(|d| d.state == DepState::Live).count();
+        let live_n = self
+            .st
+            .deploys
+            .iter()
+            .filter(|d| d.state == DepState::Live)
+            .count();
         let cdep = self.ui.view(cx, ids!(c_dep));
         if !cdep.is_empty() {
             cdep.set_visible(cx, live_n > 0);
@@ -660,11 +881,14 @@ impl App {
         }
         let mut tb = self.ui.button(cx, ids!(theme_btn));
         if !tb.is_empty() {
-            tb.set_text(cx, match self.st.theme {
-                Theme::Auto => "◐",
-                Theme::Light => "☀",
-                Theme::Dark => "☾",
-            });
+            tb.set_text(
+                cx,
+                match self.st.theme {
+                    Theme::Auto => "◐",
+                    Theme::Light => "☀",
+                    Theme::Dark => "☾",
+                },
+            );
             script_apply_eval!(cx, tb, { draw_bg +: { light: #(l as f64) } draw_text +: { light: #(l as f64) } });
         }
         let mut hb = self.ui.button(cx, ids!(help_btn));
@@ -694,32 +918,119 @@ impl App {
                 self.st.replay_driven = false;
                 self.st.resim();
             }
-            LAct::SelRobot(id) => self.st.sel.robot = Some(id.clone()),
-            LAct::SelRun(id) => self.st.sel.run = Some(id.clone()),
-            LAct::PickCk(rn, l) => self.st.pick_ck(rn, l),
-            LAct::DepPickCk(rn, l) => self.st.dep_pick_ck(rn, l),
-            LAct::SelTarget(id) => self.st.sel_target(id),
-            LAct::Replay(id) => {
-                self.st.replay(id);
+            LAct::SelRobot(id) => {
+                self.review = Default::default();
+                if self
+                    .real_proc
+                    .as_ref()
+                    .is_some_and(|p| p.kind == nexus::ProcKind::Sweep)
+                    && self.st.sel.robot.as_ref() != Some(id)
+                {
+                    self.st.toast(
+                        "Stop the sweep and wait for it to finish before switching robots.".into(),
+                    );
+                    self.sync_all(cx);
+                    return;
+                }
+                if self.st.sel.robot.as_ref() != Some(id) {
+                    self.st.sel.ck = None;
+                    self.st.sel.ck_run = None;
+                    self.mj = None;
+                    self.cross = None;
+                    self.preview_key.clear();
+                    self.st.sweep_grid = None;
+                    self.st.sweep_state = SweepState::Idle;
+
+                    self.replay = None;
+                    self.replay_map = None;
+                    self.st.replay_driven = false;
+                    self.st.live.frames = 0;
+                    self.external_motion = ExternalMotionState::default();
+                }
+                self.st.sel.robot = Some(id.clone());
+            }
+            LAct::SelRun(id) => {
+                self.review = Default::default();
+                if self
+                    .real_proc
+                    .as_ref()
+                    .is_some_and(|p| p.kind == nexus::ProcKind::Sweep)
+                    && self.st.sel.run.as_ref() != Some(id)
+                {
+                    self.st.toast(
+                        "Stop the sweep and wait for it to finish before switching runs.".into(),
+                    );
+                    self.sync_all(cx);
+                    return;
+                }
+                if self.st.sel.run.as_ref() != Some(id) {
+                    self.st.sel.ck = None;
+                    self.st.sel.ck_run = None;
+                    self.mj = None;
+                    self.cross = None;
+                    self.preview_key.clear();
+                    self.st.sweep_grid = None;
+                    self.st.sweep_state = SweepState::Idle;
+
+                    self.replay = None;
+                    self.replay_map = None;
+                    self.st.replay_driven = false;
+                    self.st.live.frames = 0;
+                    self.external_motion = ExternalMotionState::default();
+                }
+                self.st.sel.run = Some(id.clone());
+                self.st.sel.robot = self
+                    .st
+                    .run(id)
+                    .and_then(|r| self.st.snapshot_robot(&r.snapshot));
+            }
+            LAct::PickCk(rn, l) => {
+                self.evaluation.report = None;
+                self.evaluation.second = None;
+                self.review = Default::default();
+                self.st.pick_ck(rn, l);
+                self.external_motion = ExternalMotionState::default();
+                if self.external_robot_run().is_some() {
+                    self.st.mode = Mode::Validate;
+                }
+                self.mj = None;
+                self.cross = None;
+                self.preview_key.clear();
                 self.replay = None;
                 self.replay_map = None;
                 self.st.replay_driven = false;
-                if let Some(rec) = self.st.recordings.iter().find(|r| &r.id == id) {
-                    if let Some(p) = rec.path.clone() {
-                        match crate::nexus::load_rollout(std::path::Path::new(&p), &rec.name) {
-                            Some(rp) => {
-                                self.st.live.frames = rp.joints.len() as u32;
-                                self.st.live.frame = 0;
-                                self.replay = Some(rp);
-                                self.st.replay_driven = true;
-                                self.st.toast("real rollout loaded — driving the 3D robot".into());
-                            }
-                            None => self.st.toast("rollout file failed to parse".into()),
-                        }
-                    }
+            }
+            LAct::DepPickCk(rn, l) => {
+                if self.st.demo {
+                    self.st.dep_pick_ck(rn, l);
+                } else {
+                    self.st.pick_ck(rn, l);
+                    self.st.mode = Mode::Deploy;
+                }
+            }
+            LAct::SelTarget(id) => {
+                if self.deployment.session.is_some() {
+                    self.st
+                        .toast("Disconnect the current agent before changing target".into());
+                } else {
+                    self.st.sel_target(id);
+                }
+            }
+            LAct::Replay(id) => {
+                if let Err(e) = self.review_action("review-open", id) {
+                    self.st.toast(e);
                 }
             }
             LAct::SelRecipe(i) => self.st.sel_recipe(*i),
+            LAct::ExternalCase(i) => {
+                self.external_motion.case = *i;
+                self.tick_external_motion(cx);
+            }
+            LAct::EvaluationCase(i) => {
+                if let Err(e) = self.select_evaluation_case(*i) {
+                    self.st.toast(e);
+                }
+            }
             LAct::None => return,
         }
         self.sync_all(cx);
@@ -731,6 +1042,10 @@ impl App {
 
     /// Parse "action:arg" composite ids from spec-built buttons/rows.
     pub fn dispatch_arg(&mut self, cx: &mut Cx, composite: &str) {
+        if !self.can_edit() {
+            self.sync_all(cx);
+            return;
+        }
         match composite.split_once(':') {
             Some((a, b)) => {
                 let (a, b) = (a.to_string(), b.to_string());
@@ -747,16 +1062,64 @@ impl App {
                         self.st.ck_demote(&b);
                         self.sync_all(cx);
                     }
+                    "ck-onnx" => {
+                        self.st.modal = AppModal::ExportPolicy { checkpoint: b };
+                        self.sync_all(cx);
+                    }
                     "ck-export" => {
-                        self.st.ck_export(&b);
+                        let source = std::path::Path::new(&b);
+                        if source.is_file() {
+                            if let Some(dest) = rfd::FileDialog::new()
+                                .set_title("Export checkpoint")
+                                .set_file_name(source.file_name().unwrap().to_string_lossy())
+                                .save_file()
+                            {
+                                match std::fs::copy(source, &dest) {
+                                    Ok(_) => {
+                                        if source.with_extension("txt").is_file() {
+                                            if let Err(e) = std::fs::copy(
+                                                source.with_extension("txt"),
+                                                dest.with_extension("txt"),
+                                            ) {
+                                                self.st
+                                                    .toast(format!("Weights copied, but manifest export failed: {e}"));
+                                                self.sync_all(cx);
+                                                return;
+                                            }
+                                        }
+                                        self.st.toast(format!(
+                                            "Checkpoint exported to {}",
+                                            dest.display()
+                                        ));
+                                    }
+                                    Err(e) => self.st.toast(format!("Export failed: {e}")),
+                                }
+                            }
+                        } else {
+                            self.st.toast("Checkpoint file is unavailable.".into());
+                        }
                         self.sync_all(cx);
                     }
                     "ck-del" => {
-                        self.st.ck_del(&b);
+                        if self.st.demo {
+                            self.st.ck_del(&b);
+                        } else {
+                            self.preview_artifacts(Some(&b), false);
+                        }
                         self.sync_all(cx);
                     }
                     "ck-inspect" => {
                         self.st.ck_inspect(&b);
+                        self.external_motion = ExternalMotionState::default();
+                        if self.external_robot_run().is_some() {
+                            self.st.mode = Mode::Validate;
+                        }
+                        self.mj = None;
+                        self.cross = None;
+                        self.preview_key.clear();
+                        self.replay = None;
+                        self.replay_map = None;
+                        self.st.replay_driven = false;
                         self.sync_all(cx);
                     }
                     "ck-deploy" => {
@@ -782,72 +1145,118 @@ impl App {
     /// run already going — and adopt it as the selected Run row so every
     /// screen shows its numbers.
     fn start_real_train(&mut self, cx: &mut Cx) {
-        let attached = std::env::var("DOROBOT_ATTACH_LOG").is_ok();
-        match crate::nexus::run_train(2_000_000) {
-            Ok(p) => {
-                self.real_proc = Some(p);
-                self.train_seen = 0;
-                let iters: u32 = std::env::var("DOROBOT_ATTACH_ITERS")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(2_000);
-                let stage = {
-                    let fam = std::env::var("BIPED_TERRAIN_FAMILY").unwrap_or_default();
-                    let slope = std::env::var("BIPED_TERRAIN_SLOPE_DEG").unwrap_or_default();
-                    match (fam.is_empty(), slope.is_empty()) {
-                        (true, _) => "flat".to_string(),
-                        (false, true) => fam,
-                        (false, false) => format!("{fam} · {slope}°"),
-                    }
-                };
-                let name = if attached { "attached run" } else { "studio run" };
-                self.st.adopt_real_run(name, &stage, iters);
-                self.st.toast(if attached {
-                    "attached to the running trainer — its curves are live".into()
-                } else {
-                    "real training started — 2M env-steps on the linked engine".into()
-                });
-            }
-            Err(e) => self.st.toast(format!("could not start real training: {e}")),
+        if self
+            .st
+            .task_draft
+            .as_ref()
+            .is_some_and(|d| self.st.sel.robot.as_ref() == Some(&d.robot_id))
+        {
+            self.st.modal = AppModal::TaskEditor;
+            self.st
+                .toast("Save or discard the task draft before starting a new run.".into());
+            self.sync_all(cx);
+            return;
         }
-        self.sync_all(cx);
+        let scene = self.st.cur_scene().clone();
+        self.st.adopt_real_run("studio run", &scene.name, 400);
+        if std::env::var_os("DOROBOT_ATTACH_LOG").is_none() {
+            if let Some(id) = self.st.sel.run.clone() {
+                if let Some(run) = self.st.run_mut(&id) {
+                    run.set = "single scene".into();
+                    run.snapshot.seed = scene.seed.clone();
+                    run.snapshot.cfg = vec![CfgScene {
+                        full: Some(scene.clone()),
+                        name: scene.name.clone(),
+                        stance: scene.stance,
+                        terrain: scene.terrain.clone(),
+                        friction: scene.friction,
+                        kp: scene.kp,
+                        mass: scene.mass,
+                        push: scene.push,
+                    }];
+                }
+            }
+        }
+        self.st.mode = Mode::Train;
+        self.begin_launched_run(cx);
     }
 
-    /// Start the engine behind a run the user just configured and launched.
-    ///
-    /// Distinct from [`Self::start_real_train`] only in who owns the run row:
-    /// there, the trainer is found first and a row is adopted for it; here,
-    /// `Store::launch` has already inserted the row with its snapshot — the
-    /// set, the scenes, the warm start — and that provenance is the point of
-    /// the pre-flight, so it is kept and the engine started underneath it.
-    ///
-    /// Before this, Launch inserted the row and started nothing: the timeline
-    /// that followed was a demo curve, and the only way to train from the
-    /// console was a second control labelled "real train".
     fn begin_launched_run(&mut self, cx: &mut Cx) {
-        match crate::nexus::run_train(2_000_000) {
-            Ok(p) => {
-                self.real_proc = Some(p);
-                self.train_seen = 0;
-                self.st.live.real = true;
-                self.st.live.hist.clear();
-                self.st.live.now_hist.clear();
-                self.st.live.hist_full.clear();
-            }
-            // The row stays. It records what was asked for, which is still
-            // true; the toast says the engine did not start.
-            Err(e) => {
-                self.st.live.real = false;
-                self.st.toast(format!("launched, but training did not start: {e}"));
+        if !self.can_edit() {
+            return;
+        }
+        let task = self
+            .st
+            .sel
+            .robot
+            .as_ref()
+            .and_then(|id| self.st.robots.iter().find(|r| &r.id == id))
+            .filter(|r| r.use_task)
+            .and_then(|r| r.task.clone());
+        if let Some(run) = self.st.sel.run.clone().and_then(|id| self.st.run_mut(&id)) {
+            if let Err(error) = crate::nexus::configure_external_run(run, task.as_ref()) {
+                run.state = RunState::Failed;
+                run.diagnosis = Some(error.clone());
+                self.st.toast(format!("Training did not start: {error}"));
+                self.sync_all(cx);
+                return;
             }
         }
+        if let Err(error) = self.enqueue_selected() {
+            if let Some(id) = self.st.sel.run.clone() {
+                if let Some(run) = self.st.run_mut(&id) {
+                    run.state = RunState::Failed;
+                    run.diagnosis = Some(error.clone());
+                }
+            }
+            self.st.toast(format!("Could not queue training: {error}"));
+        }
+        self.tick_queue();
         self.sync_all(cx);
     }
 
     /// Drain progress from the running engine job; harvest the sweep surface.
     fn drain_real_proc(&mut self, cx: &mut Cx) -> bool {
-        let Some(proc_) = &mut self.real_proc else { return false };
+        let Some(proc_) = &mut self.real_proc else {
+            return false;
+        };
         let mut got = false;
+        if let Some(update) = proc_
+            .job_update
+            .as_ref()
+            .and_then(|u| u.lock().ok())
+            .map(|u| u.clone())
+        {
+            if let Some(run) = proc_
+                .run_id
+                .as_ref()
+                .and_then(|id| self.st.runs.iter_mut().find(|r| &r.id == id))
+            {
+                if let Some(job) = &mut run.job {
+                    job.connection_error = update.error.clone();
+                    if update.at > 0 {
+                        job.last_contact = Some(update.at);
+                    }
+                }
+                if let Some(status) = update.status {
+                    run.state = match status.state.as_str() {
+                        "Queued" => RunState::Queued,
+                        "Starting" => RunState::Starting,
+                        "Running" => RunState::Running,
+                        "Paused" => RunState::Paused,
+                        "Stopping" => RunState::Stopping,
+                        "Stopped" => RunState::Stopped,
+                        "Completed" => RunState::Completed,
+                        "Failed" => RunState::Failed,
+                        _ => RunState::Unknown,
+                    };
+                    if let Some(error) = status.error {
+                        run.diagnosis = Some(error);
+                    }
+                }
+                got = true;
+            }
+        }
         while let Ok(line) = proc_.rx.try_recv() {
             got = true;
             self.real_lines.push(line);
@@ -861,56 +1270,73 @@ impl App {
         if proc_.kind == crate::nexus::ProcKind::Train {
             if let Some(h) = &proc_.train {
                 if let Ok(g) = h.shared.lock() {
-                    let from = self.train_seen.min(g.samples.len());
-                    // The stream self-trims its history; renumber against what
-                    // remains rather than sticking to absolute indices.
-                    if self.train_seen > g.samples.len() {
-                        self.train_seen = g.samples.len();
-                    }
-                    let fresh = &g.samples[from..];
+                    let fresh: Vec<_> = g
+                        .samples
+                        .iter()
+                        .filter(|s| s.step > self.train_seen as u64)
+                        .collect();
                     if !fresh.is_empty() {
                         got = true;
-                        for s in fresh {
-                            self.st.live.hist.push(s.reward as f64);
-                            self.st.live.hist_full.push(s.reward as f64);
-                        }
-                        // The full-run curve stays bounded by decimation, not
-                        // truncation — the shape of the whole run survives.
-                        if self.st.live.hist_full.len() > 1200 {
-                            let dec: Vec<f64> = self
-                                .st
-                                .live
-                                .hist_full
-                                .chunks(2)
-                                .map(|c| c.iter().sum::<f64>() / c.len() as f64)
-                                .collect();
-                            self.st.live.hist_full = dec;
-                        }
-                        let keep = self.st.live.hist.len().saturating_sub(120);
-                        if keep > 0 {
-                            self.st.live.hist.drain(0..keep);
-                        }
                         let last = &fresh[fresh.len() - 1];
-                        self.st.live.reward = last.reward as f64;
-                        self.st.live.falls = last.fall_rate as f64 * 100.0;
-                        self.st.live.sps = last.steps_per_sec;
                         let envs = g.envs.max(1) as u64;
-                        let iter = last.step / (envs * 24);
+                        let horizon = if proc_.backend.starts_with("CPU") {
+                            32
+                        } else if proc_.backend.starts_with("External") {
+                            proc_
+                                .run_id
+                                .as_ref()
+                                .and_then(|id| self.st.run(id))
+                                .and_then(|run| run.snapshot.training_profile.as_ref())
+                                .and_then(|profile| profile["recipe"]["steps_per_env"].as_u64())
+                                .unwrap_or(24)
+                                .max(1)
+                        } else {
+                            24
+                        };
+                        let iter = last.step / (envs * horizon);
                         let steps_m = last.step as f64 / 1.0e6;
-                        let best = self.st.live.hist.iter().cloned().fold(f64::MIN, f64::max);
+                        let best = fresh
+                            .iter()
+                            .map(|s| s.reward as f64)
+                            .fold(f64::NEG_INFINITY, f64::max);
                         if let Some(r) = self
                             .st
-                            .sel
-                            .run
-                            .clone()
+                            .runs
+                            .iter()
+                            .find(|r| Some(&r.id) == proc_.run_id.as_ref())
+                            .map(|r| r.id.clone())
                             .and_then(|id| self.st.run_mut(&id))
                         {
-                            r.iter = (iter as u32).min(r.iters_per);
+                            for sample in &fresh {
+                                r.metrics.push(RunMetric {
+                                    fall_rate_unmeasured: sample.fall_rate_unmeasured,
+                                    step: sample.step,
+                                    reward: sample.reward as f64,
+                                    fall_rate: sample.fall_rate as f64,
+                                    steps_per_sec: sample.steps_per_sec,
+                                });
+                            }
+                            let excess = r.metrics.len().saturating_sub(1200);
+                            r.metrics.drain(..excess);
+                            r.iter = (iter % r.iters_per.max(1) as u64) as u32;
+                            r.stage = ((iter / r.iters_per.max(1) as u64) as usize)
+                                % r.stages.len().max(1);
+                            r.round = (iter
+                                / (r.iters_per.max(1) as u64 * r.stages.len().max(1) as u64))
+                                as u32
+                                + 1;
+                            if proc_.backend.starts_with("External") {
+                                r.iter = iter.min(r.iters_per as u64) as u32;
+                                r.stage = 0;
+                                r.round = 1;
+                            }
                             r.steps = steps_m;
-                            r.best = Some(best);
+                            r.best = Some(r.best.unwrap_or(f64::NEG_INFINITY).max(best));
                         }
                     }
-                    self.train_seen = g.samples.len();
+                    if let Some(s) = fresh.last() {
+                        self.train_seen = s.step as usize;
+                    }
                 }
             }
         }
@@ -946,17 +1372,76 @@ impl App {
                 }
             }
             if kind == crate::nexus::ProcKind::Train {
-                self.st.live.real = false;
-                if let Some(r) = self.st.sel.run.clone().and_then(|id| self.st.run_mut(&id)) {
-                    if r.state == RunState::Running {
+                self.st.live.real = !self.st.demo;
+                let failure = proc_
+                    .train
+                    .as_ref()
+                    .and_then(|h| h.shared.lock().ok())
+                    .and_then(|g| g.error.clone());
+                if let Some(r) = proc_
+                    .run_id
+                    .as_ref()
+                    .and_then(|id| self.st.runs.iter_mut().find(|r| &r.id == id))
+                {
+                    if let Some(e) = failure {
+                        r.state = RunState::Failed;
+                        r.diagnosis = Some(e);
+                    } else if r.state == RunState::Running {
                         r.state = RunState::Completed;
+                    }
+                    let cps = nexus_engine::ckpt::list(&r.id);
+                    for (path, m) in cps {
+                        let id = path.to_string_lossy().to_string();
+                        if !r.ckpts.iter().any(|c| c.id == id) {
+                            r.ckpts.push(Ckpt {
+                                score_known: true,
+                                id,
+                                label: format!("step {}", m.step),
+                                score: m.score,
+                                st: CkSt::Ord,
+                                pname: None,
+                            });
+                        }
+                    }
+                    if let Some(path) = proc_
+                        .artifact
+                        .as_ref()
+                        .filter(|p| std::path::Path::new(p).is_file())
+                    {
+                        if !r.ckpts.iter().any(|c| &c.id == path) {
+                            r.ckpts.push(Ckpt {
+                                score_known: true,
+                                id: path.clone(),
+                                label: std::path::Path::new(path)
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| "policy".into()),
+                                score: r.metrics.last().map(|s| s.reward).or(r.best).unwrap_or(0.0),
+                                st: CkSt::Ord,
+                                pname: None,
+                            });
+                        }
                     }
                 }
             }
             self.drive_ack += 1;
+            let finished_id = proc_.run_id.clone();
             self.real_proc = None;
+            self.refresh_artifacts();
+            self.st.sync_run_metrics();
             let msg = match kind {
-                crate::nexus::ProcKind::Train => "real training finished".to_string(),
+                crate::nexus::ProcKind::Train => {
+                    match finished_id.as_ref().and_then(|id| self.st.run(id)) {
+                        Some(run) if run.state == RunState::Failed => format!(
+                            "Training failed: {}",
+                            run.diagnosis.as_deref().unwrap_or("See run diagnosis")
+                        ),
+                        Some(run) if run.state == RunState::Stopped => {
+                            "Training stopped; saved checkpoints are available.".into()
+                        }
+                        _ => "Training completed.".into(),
+                    }
+                }
                 crate::nexus::ProcKind::Sweep => "real sweep finished".to_string(),
             };
             if kind == crate::nexus::ProcKind::Train {
@@ -968,6 +1453,7 @@ impl App {
             return true;
         }
         if got {
+            self.st.sync_run_metrics();
             crate::drive::dump_state(self);
         }
         if got && matches!(self.st.mode, Mode::Train | Mode::Validate) {
@@ -1006,7 +1492,9 @@ impl App {
                 }
                 // Scores without motion. Said plainly rather than left as a
                 // robot standing still, which reads as a policy that froze.
-                _ => self.st.toast("MuJoCo finished — no rollout to replay".into()),
+                _ => self
+                    .st
+                    .toast("MuJoCo finished — no rollout to replay".into()),
             }
             self.drive_ack += 1;
             crate::drive::dump_state(self);
@@ -1027,8 +1515,115 @@ impl App {
         if std::env::var("NEXUS_MJCF").is_ok() {
             return;
         }
+        if self.st.mode == Mode::Robots {
+            let key = format!("robot-inspector:{:?}", self.loaded_urdf);
+            if self.terrain_shown != key {
+                use makepad_urdf_player::robot_view::RobotViewWidgetRefExt;
+                let rv = self.ui.robot_view(cx, ids!(stage.urdf_wrap.rview));
+                if let Some(mut inner) = rv.borrow_mut() {
+                    inner.clear_external(cx);
+                    inner.clear_terrain(cx);
+                    inner.set_base_pose(cx, [0., 0., 0.], [0., 0., 0., 1.]);
+                    inner.reset_view(cx);
+                    self.terrain_shown = key;
+                };
+            }
+            return;
+        }
+        // External flat-ground rollouts use simulation world z=0. The URDF
+        // inspector's automatically fitted floor is below the rest-pose feet
+        // (z=-0.125 for Microduck), so it cannot represent this world.
+        let recorded_duck = self.st.mode == Mode::Inspect
+            && self.replay.as_ref().is_some_and(|r| !r.base.is_empty())
+            && self
+                .st
+                .sel
+                .robot
+                .as_ref()
+                .and_then(|id| self.st.robots.iter().find(|r| &r.id == id))
+                .is_some_and(|r| matches!(r.name.as_str(), "Microduck" | "Open Duck Mini v2"));
+        if self.external_robot_run().is_some()
+            || recorded_duck
+            || self.simulation_matches_selection()
+            || self.evaluation_visible()
+            || (self.st.mode == Mode::Inspect
+                && self
+                    .review
+                    .document
+                    .as_ref()
+                    .and_then(|d| d.samples.first())
+                    .is_some_and(|s| s.session_id.is_some()))
+        {
+            if self.terrain_shown == "external-flat" {
+                return;
+            }
+            use makepad_urdf_player::robot_view::{ExternalItem, RobotViewWidgetRefExt};
+            let rv = self.ui.robot_view(cx, ids!(stage.urdf_wrap.rview));
+            let comparison = self.evaluation_visible() && self.evaluation.second.is_some();
+            let rv_b = self.ui.robot_view(cx, ids!(stage.urdf_wrap.rview_b));
+            let Some(mut inner) = rv.borrow_mut() else {
+                return;
+            };
+            inner.clear_terrain(cx);
+            let mut items = Vec::new();
+            for color in 0..2 {
+                let mut positions = Vec::new();
+                let mut normals = Vec::new();
+                let mut indices = Vec::new();
+                for x in -40..40_i32 {
+                    for y in -40..40_i32 {
+                        if (x + y).rem_euclid(2) != color {
+                            continue;
+                        }
+                        let n = (positions.len() / 3) as u32;
+                        for (dx, dy) in [(0, 0), (1, 0), (1, 1), (0, 1)] {
+                            positions.extend_from_slice(&[
+                                (x + dx) as f32 * 0.2,
+                                (y + dy) as f32 * 0.2,
+                                0.0,
+                            ]);
+                            normals.extend_from_slice(&[0.0, 0.0, 1.0]);
+                        }
+                        indices.extend_from_slice(&[n, n + 1, n + 2, n, n + 2, n + 3]);
+                    }
+                }
+                let key = 0x4e585f464c4f4f00 + color as u64;
+                inner.upsert_external_mesh(cx, key, &positions, &normals, &indices);
+                if comparison {
+                    if let Some(mut second) = rv_b.borrow_mut() {
+                        second.clear_terrain(cx);
+                        second.upsert_external_mesh(cx, key, &positions, &normals, &indices);
+                    }
+                }
+                items.push(ExternalItem {
+                    mesh_key: key,
+                    transform: [
+                        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+                    ],
+                    scale: [1., 1., 1.],
+                    color: if color == 0 {
+                        [0.20, 0.30, 0.40, 1.]
+                    } else {
+                        [0.10, 0.20, 0.31, 1.]
+                    },
+                    metallic: 0.0,
+                    roughness: 1.0,
+                });
+            }
+            inner.set_external_items(cx, items.clone());
+            if comparison {
+                if let Some(mut second) = rv_b.borrow_mut() {
+                    second.set_external_items(cx, items);
+                }
+            }
+            self.terrain_shown = "external-flat".into();
+            return;
+        }
         let sc = crate::nexus::from_ui(&self.st.cur_scene());
-        let key = format!("{}|{:.2}|{:.1}|{:x}", sc.terrain, sc.terrain_amp, sc.terrain_slope_deg, sc.seed);
+        let key = format!(
+            "{}|{:.2}|{:.1}|{:x}",
+            sc.terrain, sc.terrain_amp, sc.terrain_slope_deg, sc.seed
+        );
         if self.terrain_shown == key {
             return;
         }
@@ -1049,7 +1644,10 @@ impl App {
             nexus_engine::zealot::ensure_terrain_mesh(&sc)
         };
         {
-            let Some(mut inner) = rv.borrow_mut() else { return };
+            let Some(mut inner) = rv.borrow_mut() else {
+                return;
+            };
+            inner.clear_external(cx);
             match mesh {
                 Some(path) => match inner.load_terrain(cx, &path.to_string_lossy()) {
                     Ok(n) => eprintln!("scene: terrain '{}' loaded, {n} triangles", sc.terrain),
@@ -1080,7 +1678,9 @@ impl App {
         if self.mjcf_pushed {
             return;
         }
-        let Ok(path) = std::env::var("NEXUS_MJCF") else { return };
+        let Ok(path) = std::env::var("NEXUS_MJCF") else {
+            return;
+        };
         let stage = self.ui.widget(cx, ids!(stage));
         if stage.is_empty() {
             return;
@@ -1108,7 +1708,9 @@ impl App {
             model.reset_keyframe(0);
         }
         let geoms = model.scene();
-        let Some(mut inner) = rv.borrow_mut() else { return };
+        let Some(mut inner) = rv.borrow_mut() else {
+            return;
+        };
         fn h<T: Hash>(v: &T) -> u64 {
             let mut s = DefaultHasher::new();
             v.hash(&mut s);
@@ -1138,8 +1740,12 @@ impl App {
                         .flatten();
                     (key, [1.0; 3], m)
                 }
-                GeomKind::Sphere { r } => (h(&"usphere"), [r, r, r], Some(prim::unit_sphere(16, 24))),
-                GeomKind::Ellipsoid { half } => (h(&"usphere"), half, Some(prim::unit_sphere(16, 24))),
+                GeomKind::Sphere { r } => {
+                    (h(&"usphere"), [r, r, r], Some(prim::unit_sphere(16, 24)))
+                }
+                GeomKind::Ellipsoid { half } => {
+                    (h(&"usphere"), half, Some(prim::unit_sphere(16, 24)))
+                }
                 GeomKind::Cylinder { r, half_len } => {
                     (h(&"ucyl"), [r, r, half_len], Some(prim::unit_cylinder(28)))
                 }
@@ -1152,7 +1758,11 @@ impl App {
                 GeomKind::Plane { half } => {
                     let hx = if half[0] > 0.0 { half[0] } else { 25.0 };
                     let hy = if half[1] > 0.0 { half[1] } else { 25.0 };
-                    (h(&("plane", q(hx), q(hy))), [1.0; 3], Some(prim::plane(hx, hy)))
+                    (
+                        h(&("plane", q(hx), q(hy))),
+                        [1.0; 3],
+                        Some(prim::plane(hx, hy)),
+                    )
                 }
                 GeomKind::Other(_) => continue,
             };
@@ -1179,10 +1789,8 @@ impl App {
                 mesh_key: key,
                 // column-major from MuJoCo's row-major 3x3 + position
                 transform: [
-                    g.mat[0], g.mat[3], g.mat[6], 0.0,
-                    g.mat[1], g.mat[4], g.mat[7], 0.0,
-                    g.mat[2], g.mat[5], g.mat[8], 0.0,
-                    g.pos[0], g.pos[1], g.pos[2], 1.0,
+                    g.mat[0], g.mat[3], g.mat[6], 0.0, g.mat[1], g.mat[4], g.mat[7], 0.0, g.mat[2],
+                    g.mat[5], g.mat[8], 0.0, g.pos[0], g.pos[1], g.pos[2], 1.0,
                 ],
                 scale,
                 color,
@@ -1195,7 +1803,8 @@ impl App {
         inner.frame_camera_on_external(cx);
         drop(inner);
         self.mjcf = Some(model);
-        self.st.toast(format!("MJCF on stage: {n} geoms via libmujoco"));
+        self.st
+            .toast(format!("MJCF on stage: {n} geoms via libmujoco"));
     }
 
     /// Keep Train mode's stage honest: the 3D robot replays what the policy
@@ -1207,7 +1816,38 @@ impl App {
     /// rollout keeps the previous motion and is not retried until the
     /// checkpoint moves again. Returns true when fresh motion just landed.
     fn tick_train_preview(&mut self, cx: &mut Cx) -> bool {
-        if self.st.mode != Mode::Train {
+        if self.review.document.is_some() && self.st.mode == Mode::Inspect {
+            return false;
+        }
+        if !matches!(self.st.mode, Mode::Train | Mode::Scenes | Mode::Inspect) {
+            return false;
+        }
+        let Some(ckpt) = crate::nexus::selected_artifact(&self.st) else {
+            return false;
+        };
+        if !crate::artifacts::is_safetensors(&ckpt) {
+            return false;
+        }
+        let Ok(meta) = std::fs::metadata(&ckpt) else {
+            return false;
+        };
+        let stamp = meta
+            .modified()
+            .map(|t| format!("{t:?}"))
+            .unwrap_or_default();
+        let sc = self.st.cur_scene();
+        let key = format!(
+            "{ckpt}|{stamp}|{}",
+            serde_json::to_string(&sc).unwrap_or_default()
+        );
+        if self
+            .st
+            .sel
+            .robot
+            .as_ref()
+            .and_then(|id| self.st.robots.iter().find(|r| &r.id == id))
+            .is_some_and(|r| r.name != "Unitree G1-29dof")
+        {
             return false;
         }
         // Harvest a finished drive before considering a new one.
@@ -1216,6 +1856,9 @@ impl App {
                 return false;
             }
             let job = self.preview.take().unwrap();
+            if key != self.preview_key {
+                return false;
+            }
             match job.slot.snapshot() {
                 Some(r) if !r.is_empty() && !r.collapsed() => {
                     let rp = crate::nexus::replay_from(&r, "policy-preview");
@@ -1229,19 +1872,13 @@ impl App {
                     return true;
                 }
                 _ => {
-                    eprintln!("[preview] rollout failed or collapsed — keeping the last motion");
+                    self.st.toast(
+                        "Policy preview failed or collapsed; no new replay is available.".into(),
+                    );
                     return false;
                 }
             }
         }
-        let ckpt = nexus_engine::cli::zealot_ckpt_path();
-        let Ok(meta) = std::fs::metadata(&ckpt) else { return false };
-        let stamp = meta.modified().map(|t| format!("{t:?}")).unwrap_or_default();
-        let sc = self.st.cur_scene();
-        let key = format!(
-            "{ckpt}|{stamp}|{}|{:.2}|{:.1}|{}|{:.2}",
-            sc.terrain, sc.amp, sc.slope, sc.seed, sc.stance
-        );
         if key == self.preview_key {
             return false;
         }
@@ -1249,6 +1886,10 @@ impl App {
             Some(job) => {
                 eprintln!("[preview] driving {ckpt} on '{}'", sc.name);
                 self.preview_key = key;
+                self.replay = None;
+                self.replay_map = None;
+                self.st.live.playing = false;
+                self.st.live.frames = 0;
                 self.preview = Some(job);
             }
             // No drive binary on this machine: nothing will ever arrive, so
@@ -1259,6 +1900,10 @@ impl App {
     }
 
     fn drive_replay(&mut self, cx: &mut Cx) {
+        self.drive_comparison(cx);
+        if self.st.mode == Mode::Robots {
+            return;
+        }
         let Some(rp) = &self.replay else { return };
         let frame = (self.st.live.frame as usize).min(rp.joints.len().saturating_sub(1));
         let stage = self.ui.widget(cx, ids!(stage));
@@ -1298,10 +1943,43 @@ impl App {
         // while the real motion happens off-screen on the terrain.
         let base = rp.base.get(frame).copied();
         if let Some(b) = base {
+            // Small duck roots are low to the ground. Aim at the torso and
+            // keep the camera above the floor when Open Duck falls; the
+            // displayed joint/root pose still comes directly from physics.
+            let robot_name = self
+                .st
+                .sel
+                .robot
+                .as_ref()
+                .and_then(|id| self.st.robots.iter().find(|r| &r.id == id))
+                .map(|r| r.model_name())
+                .unwrap_or("");
+            let target_z = match robot_name {
+                "Microduck" => b[2] + 0.07,
+                "Open Duck Mini v2" => (b[2] + 0.10).max(0.15),
+                _ => b[2],
+            };
             if let Some(mut inner) = rv.borrow_mut() {
                 inner.set_base_pose(cx, [b[0], b[1], b[2]], [b[3], b[4], b[5], b[6]]);
-                inner.set_camera_target(cx, [b[0], b[1], b[2]]);
+                let target = if matches!(
+                    robot_name,
+                    "Microduck" | "Open Duck Mini v2" | "Unitree G1-29dof"
+                ) {
+                    [b[0], b[1], target_z]
+                } else {
+                    inner
+                        .robot()
+                        .map(|r| {
+                            let (lo, hi) = r.bounds_world();
+                            let c = (lo + hi) * 0.5;
+                            [c.x, c.y, c.z]
+                        })
+                        .unwrap_or([b[0], b[1], target_z])
+                };
+                inner.set_camera_target(cx, target);
             }
+        } else if let Some(mut inner) = rv.borrow_mut() {
+            inner.set_base_pose(cx, [0., 0., 0.], [0., 0., 0., 1.]);
         }
         if frame % 50 == 0 {
             eprintln!(
@@ -1313,6 +1991,10 @@ impl App {
     }
 
     pub fn slider_changed(&mut self, cx: &mut Cx, field: &str, v: f64) {
+        if !self.can_edit() {
+            self.sync_all(cx);
+            return;
+        }
         self.st.edit_field(field, v);
         crate::screens::sync_right_rail(self, cx);
         crate::screens::sync_stage_tl(self, cx);
@@ -1320,6 +2002,10 @@ impl App {
     }
 
     pub fn slider_committed(&mut self, cx: &mut Cx, field: &str, v: f64) {
+        if !self.can_edit() {
+            self.sync_all(cx);
+            return;
+        }
         self.st.edit_field(field, v);
         self.st.resim();
         self.sync_all(cx);
@@ -1327,8 +2013,177 @@ impl App {
 
     /// The mockup's ACT dispatcher: every named action in one place.
     pub fn dispatch_named(&mut self, cx: &mut Cx, act: &str, arg: &str) {
+        if act == "help" {
+            self.st.modal = AppModal::Tour;
+            self.sync_all(cx);
+            return;
+        }
+        if matches!(act, "list-next" | "list-prev") {
+            self.left_page = if act == "list-next" {
+                self.left_page + 1
+            } else {
+                self.left_page.saturating_sub(1)
+            };
+            crate::screens::sync_left_rail(self, cx);
+            self.redraw_ui(cx);
+            return;
+        }
+        if !self.can_edit() {
+            self.sync_all(cx);
+            return;
+        }
+        if act.starts_with("agent-") || (!self.st.demo && act == "target-ping") {
+            let action = if act == "target-ping" {
+                "agent-connect"
+            } else {
+                act
+            };
+            if let Err(error) = self.agent_action(action, arg) {
+                self.st.toast(error);
+            }
+            self.sync_all(cx);
+            return;
+        }
+        if act.starts_with("eval-") {
+            if let Err(error) = self.evaluation_action(act, arg) {
+                self.st.toast(error);
+            }
+            self.sync_all(cx);
+            return;
+        }
+        if act.starts_with("sim-")
+            || (self.simulation.is_some()
+                && matches!(act, "push" | "restart-probe" | "record-probe"))
+        {
+            let action = match act {
+                "push" => "sim-push",
+                "restart-probe" => "sim-restart",
+                "record-probe" => "sim-save",
+                _ => act,
+            };
+            if let Err(e) = self.simulation_action(action, arg) {
+                self.st.toast(e);
+            }
+            self.sync_all(cx);
+            return;
+        }
+        if matches!(act, "real-train" | "train-set")
+            && self
+                .st
+                .task_draft
+                .as_ref()
+                .is_some_and(|d| self.st.sel.robot.as_ref() == Some(&d.robot_id))
+        {
+            self.st.modal = AppModal::TaskEditor;
+            self.st
+                .toast("Save or discard the task draft before starting a new run.".into());
+            self.sync_all(cx);
+            return;
+        }
+        if matches!(
+            act,
+            "sweep-run" | "backend-profile" | "backend-native" | "backend-cpu"
+        ) && self.real_proc.is_some()
+        {
+            self.st
+                .toast("A job is already running; stop it before starting another.".into());
+            self.sync_all(cx);
+            return;
+        }
+        if matches!(act, "pause" | "resume" | "stop") && !self.st.demo {
+            if let Some(job) = &self.real_proc {
+                if let Some(h) = &job.train {
+                    let result = match act {
+                        "pause" => h.pause(),
+                        "resume" => h.resume(),
+                        _ => {
+                            h.stop();
+                            Ok(())
+                        }
+                    };
+                    match result {
+                        Ok(()) => {
+                            if let Some(r) = job
+                                .run_id
+                                .as_ref()
+                                .and_then(|id| self.st.runs.iter_mut().find(|r| &r.id == id))
+                            {
+                                if job.job_update.is_none() {
+                                    r.state = match act {
+                                        "pause" => RunState::Paused,
+                                        "resume" => RunState::Running,
+                                        _ => RunState::Stopped,
+                                    };
+                                }
+                            }
+                            self.st.toast(format!("{act} requested"));
+                        }
+                        Err(e) => self.st.toast(e),
+                    }
+                }
+            } else {
+                self.st.toast("No active training job.".into());
+            }
+            self.sync_all(cx);
+            return;
+        }
+        if act.starts_with("queue-") && !self.st.demo {
+            if let Err(error) = self.queue_action(act, arg) {
+                self.st.toast(error);
+            }
+            self.sync_all(cx);
+            return;
+        }
+        if act.starts_with("review-") && !self.st.demo {
+            if let Err(e) = self.review_action(act, arg) {
+                self.st.toast(format!("Review: {e}"));
+            }
+            self.sync_all(cx);
+            return;
+        }
+        if act == "record-probe" && !self.st.demo {
+            let result = if let Some(doc) = self.review.document.clone() {
+                self.register_review(doc)
+            } else if let Some(replay) = self.replay.clone() {
+                self.st
+                    .sel
+                    .robot
+                    .as_ref()
+                    .and_then(|id| self.st.robots.iter().find(|r| &r.id == id))
+                    .ok_or_else(|| "Select the replay robot".to_string())
+                    .and_then(|r| {
+                        crate::review::Document::from_replay(
+                            replay,
+                            Some(r.id.clone()),
+                            r.model_name().into(),
+                            self.st.sel.run.clone(),
+                        )
+                    })
+                    .and_then(|doc| self.register_review(doc))
+            } else {
+                Err("Open a policy replay or import the training recording first".into())
+            };
+            match result {
+                Ok(()) => self
+                    .st
+                    .toast("Recording saved with provenance and reversible episode edits.".into()),
+                Err(e) => self.st.toast(e),
+            }
+            self.sync_all(cx);
+            return;
+        }
         let st = &mut self.st;
         match act {
+            "external-validation" => st.mode = Mode::Validate,
+            "external-live" => st.mode = Mode::Train,
+            "validation-older" | "validation-newer" | "validation-latest" => {
+                let last = self.external_motion.validations.len().saturating_sub(1);
+                self.external_motion.checkpoint = match act {
+                    "validation-older" => (self.external_motion.checkpoint + 1).min(last),
+                    "validation-newer" => self.external_motion.checkpoint.saturating_sub(1),
+                    _ => 0,
+                };
+            }
             // scenes
             "new-scene" => st.new_scene(),
             "dup-scene" => st.dup_scene(),
@@ -1358,14 +2213,21 @@ impl App {
             // labelled "real" — which put the honest measurement behind the
             // demo and made "run sweep" mean whichever the reader guessed.
             "sweep-run" => {
-                match crate::nexus::run_sweep() {
+                let Some(checkpoint) = crate::nexus::selected_artifact(st) else {
+                    st.toast("Select a run with a saved checkpoint.".into());
+                    self.sync_all(cx);
+                    return;
+                };
+                self.st.sweep_ckpt = checkpoint.clone();
+                match crate::nexus::run_sweep(&checkpoint) {
                     Ok(p) => {
                         self.real_proc = Some(p);
                         self.st.sweep_grid = None;
                         self.st.sweep_at = 0;
                         self.st.sel.cell = None;
                         self.st.sweep_state = SweepState::Running;
-                        self.st.toast("Sweep started — 40 cells on the linked engine".into());
+                        self.st
+                            .toast("Sweep started — 40 cells on the linked engine".into());
                     }
                     Err(e) => self.st.toast(format!("could not start the sweep: {e}")),
                 }
@@ -1381,8 +2243,17 @@ impl App {
             // 45 s is long enough for episodes to terminate, and the harness
             // only records an attempt when one ends.
             "mujoco-run" => {
-                let ckpt = nexus_engine::cli::zealot_ckpt_path();
-                match crate::nexus::run_mujoco(&ckpt, 0.3, 45) {
+                let Some(ckpt) = crate::nexus::selected_artifact(st) else {
+                    st.toast("Select a G1 checkpoint to validate.".into());
+                    self.sync_all(cx);
+                    return;
+                };
+                if !crate::artifacts::is_safetensors(&ckpt) {
+                    st.toast("MuJoCo G1 validation requires a G1 safetensors checkpoint. Duck policies use their robot validation tab.".into());
+                    self.sync_all(cx);
+                    return;
+                }
+                match crate::nexus::run_mujoco(&ckpt, self.st.cur_scene().vx as f32, 45) {
                     Ok(job) => {
                         // The rollout arrives later and drives the 3D robot;
                         // clear whatever is playing so the old motion is not
@@ -1391,7 +2262,8 @@ impl App {
                         self.replay_map = None;
                         self.st.replay_driven = false;
                         self.mj = Some(job);
-                        self.st.toast("MuJoCo sim2sim started — a second engine, ~45 s".into());
+                        self.st
+                            .toast("MuJoCo sim2sim started — a second engine, ~45 s".into());
                     }
                     Err(e) => self.st.toast(e),
                 }
@@ -1401,7 +2273,12 @@ impl App {
             // The weaker arm, and labelled as such. Until this existed the
             // right rail showed four invented numbers under the same heading.
             "cross-run" => {
-                match crate::nexus::run_cross() {
+                let Some(checkpoint) = crate::nexus::selected_artifact(st) else {
+                    st.toast("Select a checkpoint to validate.".into());
+                    self.sync_all(cx);
+                    return;
+                };
+                match crate::nexus::run_cross(&checkpoint) {
                     Ok(job) => {
                         let m = format!("cross-sim started — {}", job.arm);
                         self.cross = Some(job);
@@ -1412,56 +2289,179 @@ impl App {
                 self.sync_all(cx);
                 return;
             }
-            // Abandon rather than cancel, and the toast says "abandoned" for
-            // that reason: the engine's sweep thread has no cancellation, so
-            // it runs to completion in the background. Dropping the job here
-            // stops this console reading it and keeps the partial surface,
-            // which is evidence.
             "sweep-stop" => {
                 st.sweep_stop();
-                self.real_proc = None;
+                if let Some(job) = &self.real_proc {
+                    job.stop();
+                }
+                st.toast(
+                    "Stopping sweep after the current cell; partial results will be retained."
+                        .into(),
+                );
             }
             "sweep-del" => {
-                st.sweep_del();
-                self.real_proc = None;
+                if self
+                    .real_proc
+                    .as_ref()
+                    .is_some_and(|p| p.kind == nexus::ProcKind::Sweep)
+                {
+                    st.toast(
+                        "Stop the sweep and wait for it to finish before removing results.".into(),
+                    );
+                } else {
+                    st.sweep_del();
+                }
             }
             "cell-inspect" => st.cell_inspect(),
             "cell-scene" => st.cell_scene(),
             "clear-cell" => st.cell_phys = None,
             // probe
             "push" => {
-                let m = st.tr_pub("Impulse applied — future discarded, re-simulated from here");
+                let m =
+                    "Start live physics in Inspect to apply a force to the selected policy.".into();
                 st.toast(m);
             }
             "restart-probe" => {
                 st.live.frame = 0;
                 st.live.playing = true;
-                let m = st.tr_pub("Restarted — picked up the newest checkpoint");
+                let m = "Replay restarted.".into();
                 st.toast(m);
             }
             // runs
             "rerun" => st.modal = AppModal::Rerun,
+            "continue-run" => st.modal = AppModal::ContinueRun,
             "open-run" => st.mode = Mode::Train,
             "run-archive" => st.run_archive(),
-            "run-delete" => st.modal = AppModal::DeleteRun,
+            "run-delete" => {
+                if self.st.demo {
+                    self.st.modal = AppModal::DeleteRun;
+                } else {
+                    self.preview_artifacts(None, true);
+                }
+            }
+            "export-cancel" => {
+                self.export_job = None;
+                self.st.toast("Policy export cancelled".into());
+            }
+            "artifacts-import-runs" => {
+                match crate::artifacts::discover_runs(&mut self.st, &crate::artifacts::runs_root())
+                {
+                    Ok(n) => self
+                        .st
+                        .toast(format!("Recovered {n} saved run records from disk")),
+                    Err(e) => self.st.toast(format!("Run discovery failed: {e}")),
+                }
+            }
+            "artifacts-refresh" => self.refresh_artifacts(),
+            "ck-page-prev" => self.checkpoint_page = self.checkpoint_page.saturating_sub(1),
+            "ck-page-next" => {
+                self.checkpoint_page = (self.checkpoint_page + 1).min(
+                    self.st
+                        .sel
+                        .run
+                        .as_ref()
+                        .and_then(|id| self.st.run(id))
+                        .map(|r| r.ckpts.len().saturating_sub(1) / 2)
+                        .unwrap_or(0),
+                )
+            }
+            "artifacts-cleanup" => self.st.modal = AppModal::ArtifactRetention,
+            "artifacts-trash" => self.st.modal = AppModal::Trash { page: 0 },
             // robots
-            "import-robot" => st.modal = AppModal::Wizard { step: 1 },
-            "robot-rename" => {
-                let m = st.tr_pub("Rename is metadata — the URDF is untouched");
-                st.toast(m);
+            "import-robot" => {
+                st.modal = AppModal::ImportRobot {
+                    path: String::new(),
+                    summary: None,
+                }
             }
-            "robot-remap" => {
-                let m = st.tr_pub("Mapping changed — rehearsal re-runs before the change commits");
-                st.toast(m);
+            "robot-export" => st.modal = AppModal::ExportRobot,
+            "robots-discover" => self.discover_robot_assets(),
+            "backend-native" | "backend-cpu" => {
+                if let Some(r) = st
+                    .sel
+                    .robot
+                    .as_ref()
+                    .and_then(|id| st.robots.iter_mut().find(|r| &r.id == id))
+                {
+                    r.use_task = false;
+                }
+                std::env::remove_var("NEXUS_TRAINING_PROFILE");
+                std::env::set_var(
+                    "NEXUS_BACKEND",
+                    if act == "backend-cpu" {
+                        "cpu"
+                    } else {
+                        "zealot"
+                    },
+                );
+                st.toast(
+                    if act == "backend-cpu" {
+                        "CPU cart-pole learner selected."
+                    } else {
+                        "Native Unitree G1 trainer selected."
+                    }
+                    .into(),
+                );
             }
-            "robot-remove" => st.modal = AppModal::RemoveRobotBlocked,
+            "backend-profile" => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title("Choose robot RL training profile")
+                    .add_filter("Training profile", &["json"])
+                    .pick_file()
+                {
+                    if let Some(r) = st
+                        .sel
+                        .robot
+                        .as_ref()
+                        .and_then(|id| st.robots.iter_mut().find(|r| &r.id == id))
+                    {
+                        r.use_task = false;
+                    }
+                    std::env::set_var("NEXUS_TRAINING_PROFILE", &path);
+                    st.toast(format!("Training backend: {}", path.display()));
+                }
+            }
+            "robot-rename" => st.modal = AppModal::RenameRobot,
+            "robot-remap" | "task-edit" => {
+                if let Err(e) = crate::task_editor::start(st) {
+                    st.toast(e);
+                }
+            }
+            "task-specialized" => {
+                if let Err(e) = crate::task_editor::start_specialized(st) {
+                    st.toast(e);
+                }
+            }
+            "task-generic" => {
+                if let Err(error) = crate::task_editor::start_generic(&mut self.st) {
+                    self.st.toast(error);
+                }
+            }
+            "task-profile" => {
+                if let Some(r) = st
+                    .sel
+                    .robot
+                    .as_ref()
+                    .and_then(|id| st.robots.iter_mut().find(|r| &r.id == id))
+                {
+                    r.use_task = false;
+                }
+                st.toast("Trainer profile selected; the editable task is retained.".into());
+            }
+            "robot-remove" => st.modal = AppModal::RemoveRobot,
             // deploy
             "target-new" => st.modal = AppModal::TargetForm { edit: None },
             "target-edit" => {
                 let id = st.dg.target.clone();
                 st.modal = AppModal::TargetForm { edit: id };
             }
-            "target-del" => st.target_del(),
+            "target-del" => {
+                if self.deployment.session.is_some() {
+                    st.toast("Disconnect the deployment agent before removing a target.".into());
+                } else {
+                    st.target_del();
+                }
+            }
             "target-ping" => st.target_ping(),
             "gate-export" => st.gate_start(GateId::Export),
             "gate-compat" => st.gate_start(GateId::Compat),
@@ -1487,8 +2487,6 @@ impl App {
     }
 }
 
-
-
 #[repr(C)]
 struct NSPointFfi {
     x: f64,
@@ -1508,7 +2506,7 @@ unsafe fn disable_app_nap() {
     let pi: *mut Object = msg_send![class!(NSProcessInfo), processInfo];
     let reason: *mut Object = msg_send![
         class!(NSString),
-        stringWithUTF8String: b"background training monitor + ui soak driver ".as_ptr()
+        stringWithUTF8String: b"background training monitor + ui soak driver\0".as_ptr()
     ];
     let opts: u64 = (0x00FFFFFF & !(1 << 20)) | 0xFF00000000;
     let act: *mut Object = msg_send![pi, beginActivityWithOptions: opts reason: reason];
