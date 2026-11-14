@@ -769,11 +769,7 @@ pub fn sync_modal(app: &mut App, cx: &mut Cx) {
                     format!("{} · {}", t.ip, t.iface),
                     t.cap.to_string(),
                 ),
-                None => (
-                    "g1-lab-C".into(),
-                    "192.0.2.162 · eth0".into(),
-                    "70".into(),
-                ),
+                None => ("g1-lab-C".into(), "192.0.2.162 · eth0".into(), "70".into()),
             };
             inputs.push((tt("Name"), n));
             inputs.push((tt("IP · interface"), ip));
@@ -968,14 +964,15 @@ pub fn modal_opt(app: &mut App, cx: &mut Cx, i: usize) {
     }
     match &app.st.modal {
         AppModal::ImportRobot { summary: None, .. } if i == 0 => {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("Robot or bundle", &["urdf", "json"])
-                .pick_file()
-            {
-                app.st.modal = AppModal::ImportRobot {
-                    path: path.to_string_lossy().into(),
-                    summary: None,
-                };
+            if app.pending_dialog.is_none() {
+                app.pending_dialog =
+                    Some(crate::file_dialogs::Pending::Import(app.st.modal.clone()));
+                cx.open_select_file_dialog(
+                    FileDialog::new()
+                        .set_id(live_id!(robot_import))
+                        .set_title("Choose a robot or bundle".into())
+                        .add_filter("Robot or bundle".into(), vec!["urdf".into(), "json".into()]),
+                );
             }
         }
         AppModal::AddToSet => {
@@ -1404,17 +1401,21 @@ pub fn modal_ok(app: &mut App, cx: &mut Cx) {
         }
         AppModal::Wizard { step } => {
             if step == 1 && app.st.wiz_file.is_none() {
-                let picked = rfd::FileDialog::new()
-                    .set_title("Pick a robot description")
-                    .add_filter("Robot description (URDF)", &["urdf"])
-                    .add_filter("All files", &["*"])
-                    .set_directory(std::env::var("MAKEPAD_URDF_DATA").unwrap_or_else(|_| {
-                        format!("{}/data", crate::nexus::repo_dir())
-                    }))
-                    .pick_file();
-                if let Some(p) = picked {
-                    app.st.wiz_file = Some(p.to_string_lossy().to_string());
-                    app.st.modal = AppModal::Wizard { step: 2 };
+                if app.pending_dialog.is_none() {
+                    app.pending_dialog = Some(crate::file_dialogs::Pending::Wizard);
+                    cx.open_select_file_dialog(
+                        FileDialog::new()
+                            .set_id(live_id!(wizard_robot))
+                            .set_title("Pick a robot description".into())
+                            .add_filter("Robot description (URDF)".into(), vec!["urdf".into()])
+                            .set_location(
+                                std::env::var("MAKEPAD_URDF_DATA")
+                                    .unwrap_or_else(|_| {
+                                        format!("{}/data", crate::nexus::repo_dir())
+                                    })
+                                    .into(),
+                            ),
+                    );
                 }
             } else if step >= 2 {
                 app.st.wiz_commit();

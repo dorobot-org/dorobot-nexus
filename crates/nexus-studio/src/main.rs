@@ -7,6 +7,7 @@ pub mod deployment;
 pub mod drive;
 pub mod evaluation;
 pub mod external_motion;
+mod file_dialogs;
 pub mod i18n;
 pub mod jobs;
 pub mod nexus;
@@ -235,7 +236,7 @@ script_mod! {
                                         draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_TITLE{font_size: 20.0}} }
                                     empty_description := Label{width: Fill height: Fit text: ""
                                         draw_text +: {color: mod.theme.color_text text_style: mod.widgets.nx.T_BODY{font_size: 12.0}} }
-                                    empty_action := Button{height: 44 text: "Choose a scene set"}
+                                    empty_action := mod.widgets.nx.Primary{height: 44 text: "Choose a scene set"}
                                 }
                                 stage := mod.widgets.screens.Stage{}
                                 tl := mod.widgets.screens.TimelinePanel{}
@@ -276,6 +277,8 @@ script_mod! {
 pub struct App {
     #[rust]
     workspace_error: Option<String>,
+    #[rust]
+    pending_dialog: Option<file_dialogs::Pending>,
     #[rust]
     workspace_session: Option<crate::workspace::Session>,
     #[rust]
@@ -521,6 +524,7 @@ impl MatchEvent for App {
     }
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        self.route_file_dialogs(cx, actions);
         self.route_chrome(cx, actions);
         self.route_rails(cx, actions);
         self.route_modal(cx, actions);
@@ -762,7 +766,7 @@ impl App {
                     "mode": self.st.mode.label(), "theme": format!("{:?}", self.st.theme), "light": self.light(),
                     "robot": self.st.sel.robot, "robots": self.st.robots.len(), "modal": format!("{:?}", self.st.modal),
                     "workspace_writable": self.workspace_session.is_some(), "robot_animating": self.ui.robot_view(cx, ids!(rview)).is_animating(), "workspace_error": self.workspace_error,
-                    "inspector_open": self.inspector_open, "filter": self.st.filter
+                    "inspector_open": self.inspector_open, "filter": self.st.filter, "picker_pending": self.pending_dialog.is_some()
                 }),
                 &[
                     "tab0",
@@ -784,6 +788,10 @@ impl App {
                     "stage",
                     "modal_host",
                     "b_rename",
+                    "rail_r.rr.r0.btns.b0",
+                    "rail_r.rr.r5.cap.btn",
+                    "rail_r.rr.r7.btns.b0",
+                    "modal_host.panel.opts.opt0",
                     "modal_host.panel.foot.b_cancel",
                 ],
             );
@@ -1188,31 +1196,21 @@ impl App {
                     "ck-export" => {
                         let source = std::path::Path::new(&b);
                         if source.is_file() {
-                            if let Some(dest) = rfd::FileDialog::new()
-                                .set_title("Export checkpoint")
-                                .set_file_name(source.file_name().unwrap().to_string_lossy())
-                                .save_file()
-                            {
-                                match std::fs::copy(source, &dest) {
-                                    Ok(_) => {
-                                        if source.with_extension("txt").is_file() {
-                                            if let Err(e) = std::fs::copy(
-                                                source.with_extension("txt"),
-                                                dest.with_extension("txt"),
-                                            ) {
-                                                self.st
-                                                    .toast(format!("Weights copied, but manifest export failed: {e}"));
-                                                self.sync_all(cx);
-                                                return;
-                                            }
-                                        }
-                                        self.st.toast(format!(
-                                            "Checkpoint exported to {}",
-                                            dest.display()
-                                        ));
-                                    }
-                                    Err(e) => self.st.toast(format!("Export failed: {e}")),
-                                }
+                            if self.pending_dialog.is_none() {
+                                self.pending_dialog =
+                                    Some(file_dialogs::Pending::Checkpoint(source.to_path_buf()));
+                                cx.open_save_file_dialog(
+                                    FileDialog::new()
+                                        .set_id(live_id!(checkpoint_export))
+                                        .set_title("Export checkpoint".into())
+                                        .set_filename(
+                                            source
+                                                .file_name()
+                                                .unwrap()
+                                                .to_string_lossy()
+                                                .into_owned(),
+                                        ),
+                                );
                             }
                         } else {
                             self.st.toast("Checkpoint file is unavailable.".into());
@@ -2523,21 +2521,15 @@ impl App {
                 );
             }
             "backend-profile" => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_title("Choose robot RL training profile")
-                    .add_filter("Training profile", &["json"])
-                    .pick_file()
-                {
-                    if let Some(r) = st
-                        .sel
-                        .robot
-                        .as_ref()
-                        .and_then(|id| st.robots.iter_mut().find(|r| &r.id == id))
-                    {
-                        r.use_task = false;
-                    }
-                    std::env::set_var("NEXUS_TRAINING_PROFILE", &path);
-                    st.toast(format!("Training backend: {}", path.display()));
+                if self.pending_dialog.is_none() {
+                    self.pending_dialog =
+                        Some(file_dialogs::Pending::Profile(st.sel.robot.clone()));
+                    cx.open_select_file_dialog(
+                        FileDialog::new()
+                            .set_id(live_id!(training_profile))
+                            .set_title("Choose robot RL training profile".into())
+                            .add_filter("Training profile".into(), vec!["json".into()]),
+                    );
                 }
             }
             "robot-rename" => st.modal = AppModal::RenameRobot,
