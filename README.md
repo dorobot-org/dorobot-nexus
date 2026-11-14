@@ -1,13 +1,19 @@
 # dorobot-nexus
 
+This is the independent Nexus Studio Git repository and Cargo workspace.
+Clone this repository beside `dorobot-studio` and open it as the project root.
+The shared UI crate resolves from `../dorobot-studio/crates/dorobot-ux`.
+
 A native training studio for GPU reinforcement learning on humanoids, written in
 Rust on [makepad](https://github.com/makepad/makepad).
 
-The goal: put the simulator and the console in **one process**, so the viewport
-is the simulation rather than a video of it — which is what makes
-single-stepping, perturbing a running policy and zero-latency scrubbing possible
-at all. Every other trainer in this space is a headless job plus a browser tab
-and cannot offer them at any price.
+The studio connects scene configuration, training jobs, checkpoints, policy
+replays, measured validation and robot-agent deployment. G1 uses Zealot GPU
+training; Microduck, Open Duck and authored MuJoCo tasks use explicit MPS/CUDA
+learners. CPU cart-pole is outside the current completion scope.
+
+See the [setup guide](docs/FUNCTIONAL_REVIEW.md) for workflows, validation
+commands and hardware/deployment limits. Production mode is the default; `--demo` enables the design fixtures.
 
 It is a sibling to [DoRobot Studio](https://github.com/dorobot-org/dorobot-studio),
 not a mode inside it. They share a visual language crate; they do not share a
@@ -43,6 +49,14 @@ why the headless surfaces live in the engine rather than in a console: they are
 pure std, so both consoles inherit them and a script gets them without starting
 a GUI at all.
 
+## Adora Nano
+
+The portable Nano model is bundled at `data/adora_nano/adora_nano.urdf`.
+In **Robots → Import**, select that file. Nexus copies the model and referenced
+meshes into its local robot library. See the [model notes](data/adora_nano/README.md)
+for CAD provenance and limits. Training needs a matching task and actuator
+mapping; importing the URDF does not configure a trainer.
+
 ## Quick start
 
 ```bash
@@ -50,9 +64,9 @@ tools/fetch_robot_meshes.py g1     # 20 MB, once — meshes are fetched, not com
 cargo run --release -p nexus-studio   # the lifecycle console
 ```
 
-`nexus-studio` needs the `dorobot-studio` checkout beside this one, for the
-shared `dorobot-ux` crate. It launches the built-in CPU learner, which trains
-while you watch.
+`nexus-studio` uses the shared `dorobot-ux` crate from the separate
+`../dorobot-studio` project (relative to this checkout). Production opens the saved workspace. Select a robot
+and launch its configured trainer; the CPU cart-pole task requires explicit selection.
 
 The headless surfaces live in the engine, so they are the same run whichever
 way you reach them:
@@ -108,8 +122,8 @@ cargo run --release -p nexus-studio --features zealot    # same console, GPU bip
 real `cargo-gpu`, primes the rust-gpu toolchain, applies one patch and builds
 zealot's trainer. It is idempotent and it fails loudly rather than silently
 producing something subtly wrong. Everything lands in `zealot-stack/`, which is
-gitignored. Without it, `--features zealot` falls back to the CPU learner and
-says so, rather than presenting a dead screen.
+gitignored. Without it, G1 training reports the missing dependency. Select
+`NEXUS_BACKEND=cpu` explicitly to use the separate cart-pole task.
 
 ---
 
@@ -120,7 +134,7 @@ running. That seam is the whole architecture: `trainer.rs` promised "the trainer
 is a job behind a metric stream, so it can be swapped without touching a
 screen", and `zealot.rs` is that swap.
 
-| | **CPU learner** (default) | **zealot GPU** (`--features zealot`) |
+| | **CPU learner** (`NEXUS_BACKEND=cpu`) | **zealot GPU** (`--features zealot`) |
 |---|---|---|
 | Task | balance + velocity tracking, inverted pendulum | Unitree G1 biped locomotion |
 | Physics | `crates/nexus-engine/src/env.rs`, vectorised, in-process | nexus on the GPU via khal → Metal/Vulkan/CUDA |
@@ -270,15 +284,11 @@ with the zealot backend compiled in.
 manifest with run, scene, seed, step, score, network shape and the reward terms
 with their weights — so a blob on disk is always traceable to what produced it.
 
-**Inspect drives them.** Loads the newest checkpoint, runs the policy
-deterministically (its mean action, so stepping back and forth shows the same
-trajectory twice), and gives you play, pause, single-step, scrub, restart and
-**push**. The push is the one a headless trainer cannot offer: it applies an
-impulse, discards the future it invalidated, and re-simulates from there. On a
-trained policy you watch it recover — pole knocked to −0.15 rad, the policy
-answering at 0.88 of full effort, reward dropping and climbing back. Restart
-pulls in any newer checkpoint, so a probe left open during training does not
-stay stuck on the policy it first loaded.
+**Inspect replays measured motion.** G1 checkpoint previews and saved recordings
+support play, pause and scrubbing. Duck checkpoint inspection opens the selected
+run's measured validation trials. Saving a replay preserves its robot and run
+identity. Interactive CPU perturbations are available through `--probe`; the
+Studio viewport does not apply pushes to a live G1 or duck simulator.
 
 **Domain randomization.** Pole mass, actuator authority and cart drag are drawn
 per episode from a declared distribution, and training runs across it.
@@ -300,14 +310,20 @@ integration error but cannot catch a modelling error.
 **Collapsed rollouts are refused, not scored.** See
 [the reset trap](#the-trap-that-hid-it) below.
 
-## What is not real
+## Product acceptance
 
-- **No robot import.** That control logs that it is unbuilt rather than
-  pretending.
-- **Scene's randomization sliders** display the distribution but cannot edit it.
-- **Runs 2 and 3 are fixtures**, and the screen says so.
-- **Velocity tracking is not solved** on the CPU task — see below, and the app
-  says so in words rather than hiding it.
+The [setup guide](docs/FUNCTIONAL_REVIEW.md) describes workflows and validation
+requirements. Native live physics covers G1,
+Microduck, Open Duck and generic tasks. Validate runs held-out trials, synchronized
+checkpoint comparisons, confidence intervals and report export. Deploy connects an
+authenticated agent with policy checks, dry-run, staged commands, watchdog stop and
+retained rollback. See [deployment setup](tools/deploy/README.md).
+
+[Local/SSH jobs](tools/jobs/README.md), task authoring, portable robot bundles,
+telemetry/episode editing, checkpoint continuation and durable file retention are
+implemented and tested. Physical hardware commissioning is still unverified.
+Production does not seed fixture runs. `--demo` retains design demonstrations.
+
 
 ---
 
@@ -504,13 +520,29 @@ data/g1/           Unitree G1 URDF (BSD-3-Clause, Unitree Robotics)
 ## Tests
 
 ```bash
-cargo test --workspace                                 # 91 tests
-cargo test --workspace --features nexus-studio/zealot  # 93 — adds the zealot parsers
+cargo test --release -p nexus-engine -p nexus-studio --all-features  # 173 standard tests
+cargo test --release --workspace --all-features                  # all workspace crates
 ```
 
 The zealot parsers are tested against **verbatim** output captured from real
 runs, not reconstructed fixtures — a parser for someone else's stdout is worth
 exactly as much as its fidelity to the real thing.
+
+## Workspace and artifact recovery
+
+Studio saves unsaved scene drafts and selections and locks the workspace against concurrent writers. Older documents migrate with a backup. Robot display renames preserve their model identity and saved training contracts. **Runs → Continue checkpoint…** starts a new run from selected weights with an additional iteration budget.
+
+**Train → Refresh files** discovers periodic checkpoints. **Cleanup…** previews the exact files covered by keep-last/best/promoted retention and saved references. Files move into **Runs → Trash**, where restore remains available after restart. Permanent deletion has a separate review. **Discover saved runs** recovers saved run records whose ledger entries are missing; the original worker status is explicitly unknown.
+
+**Export ONNX…** produces a bundle containing normalized policy inference, source weights, the saved recipe, numeric parity cases and provenance. Open Duck, Microduck, G1 and the native CPU reference task are supported. Existing bundles are preserved. Exports still require a matching controller and physical validation before deployment.
+
+## Configurable URDF tasks
+
+**Robots → Create URDF task** opens the native task editor. Configure PPO, simulation, velocity commands, reward weights, observations and actuator mapping/gains/limits; **Save task** activates a new revision for future runs. Unapplied text and editor pages recover after restart. **Use trainer profile** selects the original integration while retaining the edited task. The generic URDF velocity task has its own policy contract.
+
+**Start training** runs CPU MuJoCo physics with an explicit `mps` or `cuda` learner (legacy CPU settings remain readable). The installed PyTorch/MuJoCo/RSL-RL environment is required. Runs capture the task and a model snapshot containing mesh assets. Continuation verifies that snapshot and restores optimizer/normalization state; ONNX export includes the captured task/model and checks action parity. Training also records every control transition and publishes held-out validation replays. Inspect edits recorded telemetry and episodes; Validate compares captured checkpoints with measured statistics.
+
+**Microduck → Edit official task** edits the original mjlab/BAM task, including firmware Kp, optional actuator caps and curriculum mode. **Open Duck Mini v2 → Edit joystick task** edits the Nexus MuJoCo port of the original joystick/imitation task. Both support the same native PPO, timing, command, reward and observation controls. All 14 servo channels remain required. Edited observation layouts produce matching checkpoint and ONNX dimensions. Runs keep captured task/model contracts when library settings change; **Continue from checkpoint** restores the saved configuration, optimizer and normalizer. See [specialized task authoring](tools/training/AUTHORED_TASKS.md).
 
 ## Troubleshooting
 
@@ -530,3 +562,14 @@ implements on the GPU (itself a port of rsl_rl);
 [nexus](https://github.com/dimforge/nexus) is the physics engine underneath it.
 The G1 model is from
 [unitree_ros](https://github.com/unitreerobotics/unitree_ros), BSD-3-Clause.
+
+
+### Portable robots and measured recording review
+
+**Robots → Import bundle** accepts a URDF or a Nexus bundle folder/manifest. **Export bundle** captures the selected robot's transitive assets and saved task. Imports receive a new library identity. **Remove → Preview files** shows owned assets and reference protections; **Workspace trash** restores removed files/settings after restart. **Discover assets** recovers completed orphan robot folders.
+
+**Inspect → Import training stream** saves the selected run's continuous environment-0 recording. Select a channel to inspect measured observations, policy actions, targets, torques, rewards or physical poses at the playhead. Episode controls split, trim, exclude and annotate ranges. **Reset edits** recovers source frames; **Export edited dataset** writes the included recording plus per-frame source provenance to a new folder. Original logs remain intact. Both duck workers and the generic task capture continuous control telemetry; older pose-only sources show unavailable channels explicitly.
+
+### Live simulation
+
+Inspect now runs captured MuJoCo policies with velocity commands, physical pushes, pause/step/restart and recoverable trajectory recording. G1 uses its captured native controller; both ducks support authored and legacy checkpoints. See [live simulation controls](tools/training/INTERACTIVE.md) and [evaluation and comparison](tools/training/EVALUATION.md). CPU-reference interactive support is excluded from the current scope.

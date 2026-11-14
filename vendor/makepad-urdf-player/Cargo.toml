@@ -1,0 +1,45 @@
+[package]
+name = "makepad-urdf-player"
+version = "0.1.0"
+edition = "2021"
+description = "A Makepad-based 3D URDF robot visualization tool with real-time joint control and animation"
+license = "MIT"
+authors = ["Yuechen"]
+repository = "https://github.com/user/makepad-urdf-viewer"
+keywords = ["robotics", "urdf", "3d", "visualization", "makepad"]
+categories = ["visualization", "simulation", "graphics"]
+rust-version = "1.75"
+
+[workspace]
+
+[features]
+default = []
+profiling = []  # Enable performance profiling output
+# LeRobot parquet episode playback. Off by default so integrating this widget
+# does not pull arrow/parquet; native-only.
+episode = ["dep:parquet", "dep:arrow"]
+
+[dependencies]
+makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev" }
+makepad-xr = { git = "https://github.com/makepad/makepad", branch = "dev" }
+urdf-rs = "0.9"
+glam = "0.29"
+stl_io = "0.7"
+# COLLADA is XML with pervasive id/url cross-references (a triangle list
+# points at sources, sources at float arrays, materials at effects), so a
+# read-only DOM is the right shape. roxmltree has no dependencies of its own.
+roxmltree = "0.20"
+serde_json = "1"
+
+# episode playback (parquet) is native-only and optional; see the `episode`
+# feature. Integrators get neither dependency unless they ask for it.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+parquet = { version = "56", optional = true }
+arrow = { version = "56", optional = true }
+
+# Upstream dev wasm is broken: web init indexes windows[id_zero] before any
+# window exists (panic_bounds_check in CxWindowPool). Local copy carries the
+# two-line fix; drop this patch when upstream merges it.
+[patch."https://github.com/makepad/makepad"]
+makepad-widgets = { path = "../makepad-dev-patched/widgets" }
+makepad-xr = { path = "../makepad-dev-patched/xr" }

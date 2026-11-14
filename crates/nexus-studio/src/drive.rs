@@ -26,7 +26,9 @@ pub const CMD_PATH: &str = "/tmp/nexus_cmd.txt";
 pub const STATE_PATH: &str = "/tmp/nexus_state.json";
 
 pub fn poll(app: &mut App, cx: &mut Cx) {
-    let Ok(text) = std::fs::read_to_string(CMD_PATH) else { return };
+    let Ok(text) = std::fs::read_to_string(CMD_PATH) else {
+        return;
+    };
     if text.trim().is_empty() {
         return;
     }
@@ -100,6 +102,20 @@ fn exec(app: &mut App, cx: &mut Cx, line: &str) {
                 app.sync_all(cx);
             }
         }
+        "input" => {
+            let fields = [
+                ids!(modal_host.panel.in_wrap0.input0),
+                ids!(modal_host.panel.in_wrap1.input1),
+                ids!(modal_host.panel.in_wrap2.input2),
+            ];
+            if let Ok(index) = a1.parse::<usize>() {
+                if let Some(path) = fields.get(index) {
+                    app.ui.widget(cx, *path).set_text(cx, a2);
+                    crate::task_editor::input(&mut app.st, index, a2.to_string());
+                    app.sync_all(cx);
+                }
+            }
+        }
         "opt" => {
             if let Ok(i) = a1.parse::<usize>() {
                 crate::screens::modal_opt(app, cx, i);
@@ -141,7 +157,9 @@ fn exec(app: &mut App, cx: &mut Cx, line: &str) {
 }
 
 fn esc_json(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', " ")
 }
 
 pub fn dump_state(app: &App) {
@@ -180,6 +198,9 @@ pub fn dump_state(app: &App) {
             "  \"real_proc\": {},\n",
             "  \"real_lines\": {},\n",
             "  \"replay\": {},\n",
+            "  \"viewport_source\": \"{}\",\n",
+            "  \"motion_joints\": {},\n",
+            "  \"motion_base\": {},\n",
             "  \"last_toast\": \"{}\"\n",
             "}}\n"
         ),
@@ -202,7 +223,10 @@ pub fn dump_state(app: &App) {
         gate(&st.dg.compat),
         gate(&st.dg.sim2sim),
         gate(&st.dg.dryrun),
-        st.dg.chk[0], st.dg.chk[1], st.dg.chk[2], st.dg.chk[3],
+        st.dg.chk[0],
+        st.dg.chk[1],
+        st.dg.chk[2],
+        st.dg.chk[3],
         st.dg.armed.clone().unwrap_or_default(),
         st.dg_live.dwell,
         st.sweep_state,
@@ -210,7 +234,64 @@ pub fn dump_state(app: &App) {
         app.real_proc.is_some(),
         app.real_lines.len(),
         app.replay.is_some(),
+        esc_json(&app.external_motion.label),
+        serde_json::to_string(
+            &app.replay
+                .as_ref()
+                .and_then(|r| r.joints.get(st.live.frame as usize))
+        )
+        .unwrap_or_else(|_| "null".into()),
+        serde_json::to_string(
+            &app.replay
+                .as_ref()
+                .and_then(|r| r.base.get(st.live.frame as usize))
+        )
+        .unwrap_or_else(|_| "null".into()),
         esc_json(&toast),
     );
-    let _ = std::fs::write(STATE_PATH, json);
+    let mut value: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+    value["lrows"] = serde_json::json!(app
+        .lmap
+        .iter()
+        .map(|s| s.row.as_ref().map(|r| &r.0))
+        .collect::<Vec<_>>());
+    value["robot"] = serde_json::json!(st
+        .sel
+        .robot
+        .as_ref()
+        .and_then(|id| st.robots.iter().find(|r| &r.id == id))
+        .map(|r| &r.name));
+    value["reward"] = serde_json::json!(st.live.reward);
+    value["sps"] = serde_json::json!(st.live.sps);
+    value["history_len"] = serde_json::json!(st.live.hist_full.len());
+    value["artifact"] = serde_json::json!(crate::nexus::selected_artifact(st));
+    value["left_page"] = app.left_page.into();
+    value["system_light"] = app.system_light.into();
+    value["scene"] = serde_json::json!(st.cur_scene());
+    value["run"] = serde_json::json!(st.sel.run.as_ref().and_then(|id| st.run(id)));
+    value["review"] = serde_json::json!(app.review.document.as_ref().map(|d| serde_json::json!({"recording":app.review.recording,"revision":d.revision,"frames":d.replay.joints.len(),"samples":d.samples.len(),"segments":d.segments,"included":d.included().len(),"segment":app.review.segment,"channel":app.review.channel,"sample":d.samples.get(st.live.frame as usize)})));
+    value["queue_enabled"] = st.queue_enabled.into();
+    value["job_settings"] = serde_json::json!(st.job_settings);
+    value["jobs"] = serde_json::json!(st
+        .runs
+        .iter()
+        .filter(|r| r.job.is_some())
+        .collect::<Vec<_>>());
+    value["export_running"] = app.export_job.is_some().into();
+    value["deployment"] = serde_json::json!(app.deployment.session.as_ref().map(|s| &s.status));
+    value["simulation"] = serde_json::json!(app.simulation.as_ref().map(|s| &s.status));
+    value["evaluation"] = serde_json::json!({"job":app.evaluation.job.as_ref().map(|j| &j.status),"report":app.evaluation.report,"case":app.evaluation.case,"second_frames":app.evaluation.second.as_ref().map(|r|r.joints.len()),"visible":app.evaluation_visible()});
+    value["trash_count"] = st.trash.len().into();
+    value["task_draft"] = serde_json::json!(st.task_draft);
+    value["robot_config"] = serde_json::json!(st
+        .sel
+        .robot
+        .as_ref()
+        .and_then(|id| st.robots.iter().find(|r| &r.id == id)));
+    let _ = std::fs::write(
+        format!("{STATE_PATH}.tmp"),
+        serde_json::to_vec_pretty(&value).unwrap_or_default(),
+    );
+
+    let _ = std::fs::rename(format!("{STATE_PATH}.tmp"), STATE_PATH);
 }

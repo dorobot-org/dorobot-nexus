@@ -50,14 +50,30 @@ impl Report {
             format!("{}{:.3}", if v >= 0.0 { "+" } else { "−" }, v.abs())
         };
         [
-            ("survival", f(self.a.survival), f(self.b.survival),
-             d(self.a.survival, self.b.survival)),
-            ("tracking", f(self.a.tracking), f(self.b.tracking),
-             d(self.a.tracking, self.b.tracking)),
-            ("mean reward", f(self.a.reward), f(self.b.reward),
-             d(self.a.reward, self.b.reward)),
-            ("fall rate", f(self.a.fall_rate), f(self.b.fall_rate),
-             d(self.a.fall_rate, self.b.fall_rate)),
+            (
+                "survival",
+                f(self.a.survival),
+                f(self.b.survival),
+                d(self.a.survival, self.b.survival),
+            ),
+            (
+                "tracking",
+                f(self.a.tracking),
+                f(self.b.tracking),
+                d(self.a.tracking, self.b.tracking),
+            ),
+            (
+                "mean reward",
+                f(self.a.reward),
+                f(self.b.reward),
+                d(self.a.reward, self.b.reward),
+            ),
+            (
+                "fall rate",
+                f(self.a.fall_rate),
+                f(self.b.fall_rate),
+                d(self.a.fall_rate, self.b.fall_rate),
+            ),
         ]
     }
 
@@ -125,8 +141,14 @@ fn evaluate(ppo: &mut Ppo, integrator: Integrator, seed: u64) -> Score {
 }
 
 pub fn spawn(run: &str) -> Option<Arc<Mutex<Report>>> {
-    let (path, manifest) = ckpt::list(run).into_iter().next()?;
-    let (weights, _) = ckpt::read(&path).ok()?;
+    let (path, _) = ckpt::list(run).into_iter().next()?;
+    spawn_checkpoint(&path)
+}
+pub fn spawn_checkpoint(path: &std::path::Path) -> Option<Arc<Mutex<Report>>> {
+    let (weights, manifest) = ckpt::read(path).ok()?;
+    if manifest.n_obs != N_OBS || manifest.n_act != N_ACT {
+        return None;
+    }
 
     let report = Arc::new(Mutex::new(Report {
         running: true,
@@ -137,7 +159,11 @@ pub fn spawn(run: &str) -> Option<Arc<Mutex<Report>>> {
 
     thread::spawn(move || {
         let mut rng = Rng::new(manifest.seed ^ 0xC0551);
-        let hidden = if manifest.hidden == 0 { 64 } else { manifest.hidden };
+        let hidden = if manifest.hidden == 0 {
+            64
+        } else {
+            manifest.hidden
+        };
         let mut ppo = Ppo::new(N_OBS, N_ACT, hidden, Config::default(), &mut rng);
         if !ppo.load_weights(&weights) {
             if let Ok(mut r) = out.lock() {
@@ -184,7 +210,11 @@ pub mod zealot_cross {
     const FINE: &str = "1";
 
     fn evaluate(ckpt: &str, decimation: &str) -> Option<Score> {
-        let cmd = Drive { vx: COMMAND_VX, seconds: SECONDS, ..Drive::default() };
+        let cmd = Drive {
+            vx: COMMAND_VX,
+            seconds: SECONDS,
+            ..Drive::default()
+        };
         let knobs = [
             ("BIPED_DECIMATION", decimation.to_string()),
             ("BIPED_SPAWN_DR", "0".to_string()),
@@ -250,7 +280,12 @@ pub mod zealot_cross {
 /// `worst_gap` reads exactly as it does for the other arms: how far the two
 /// engines disagree about the same policy.
 pub fn spawn_mujoco(ckpt: &str, command_vx: f32, seconds: u32) -> Option<Arc<Mutex<Report>>> {
-    spawn_mujoco_into(ckpt, command_vx, seconds, crate::zealot::RolloutSlot::default())
+    spawn_mujoco_into(
+        ckpt,
+        command_vx,
+        seconds,
+        crate::zealot::RolloutSlot::default(),
+    )
 }
 
 /// As [`spawn_mujoco`], and also fills `rollout` with the trajectory MuJoCo
@@ -313,25 +348,69 @@ mod tests {
 
     #[test]
     fn a_perfect_agreement_has_no_gap() {
-        let s = Score { survival: 1.0, tracking: 0.8, reward: 0.9, fall_rate: 0.0 };
-        let r = Report { a: s, b: s, ..Default::default() };
+        let s = Score {
+            survival: 1.0,
+            tracking: 0.8,
+            reward: 0.9,
+            fall_rate: 0.0,
+        };
+        let r = Report {
+            a: s,
+            b: s,
+            ..Default::default()
+        };
         assert!(r.worst_gap() < 1e-6);
     }
 
     #[test]
     fn the_gap_is_relative_and_takes_the_worst_axis() {
-        let a = Score { survival: 1.0, tracking: 0.80, reward: 0.9, fall_rate: 0.0 };
-        let b = Score { survival: 0.5, tracking: 0.79, reward: 0.9, fall_rate: 0.5 };
+        let a = Score {
+            survival: 1.0,
+            tracking: 0.80,
+            reward: 0.9,
+            fall_rate: 0.0,
+        };
+        let b = Score {
+            survival: 0.5,
+            tracking: 0.79,
+            reward: 0.9,
+            fall_rate: 0.5,
+        };
         // Survival halved: a 50% gap, and the worst of the three.
-        assert!((Report { a, b, ..Default::default() }.worst_gap() - 0.5).abs() < 1e-6);
+        assert!(
+            (Report {
+                a,
+                b,
+                ..Default::default()
+            }
+            .worst_gap()
+                - 0.5)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]
     fn rows_render_a_signed_delta() {
-        let a = Score { survival: 1.0, ..Default::default() };
-        let b = Score { survival: 0.75, ..Default::default() };
-        let rows = Report { a, b, ..Default::default() }.rows();
+        let a = Score {
+            survival: 1.0,
+            ..Default::default()
+        };
+        let b = Score {
+            survival: 0.75,
+            ..Default::default()
+        };
+        let rows = Report {
+            a,
+            b,
+            ..Default::default()
+        }
+        .rows();
         assert_eq!(rows[0].0, "survival");
-        assert!(rows[0].3.starts_with('−'), "expected a negative delta, got {}", rows[0].3);
+        assert!(
+            rows[0].3.starts_with('−'),
+            "expected a negative delta, got {}",
+            rows[0].3
+        );
     }
 }

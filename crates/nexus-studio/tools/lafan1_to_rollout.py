@@ -23,6 +23,7 @@ import argparse
 import os
 import sys
 import urllib.request
+from pathlib import Path
 
 # The 29 movable joints of data/g1/g1.urdf, in document order. The dataset's
 # documented column order is the same sequence (left leg, right leg, waist,
@@ -135,7 +136,7 @@ def write_rec(name, scene, frames, dist, rel_rollout, path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repo", default="/Users/ychen/home/dorobot/dorobot-nexus",
+    ap.add_argument("--repo", default=str(Path(__file__).resolve().parents[3]),
                     help="dorobot-nexus checkout; recordings land under its scenes/")
     ap.add_argument("--clip", default="walk1_subject1", help="clip name in the g1/ set")
     ap.add_argument("--csv", help="use a local CSV instead of downloading")

@@ -124,7 +124,7 @@ missing is the reason attached to it.
 
 Upstream's PR #3 fixed the *schema* include this way but the *engine* path is
 still literal — the same defect one layer down, and the same class as the old
-`#[path = "/Users/…/scene.rs"]`.
+`#[path = "/path/to/scene.rs"]`.
 
 **P2 — A real run is invisible while it runs.**
 `drain_real_proc` (`src/main.rs:713`) parses sweep rows with `parse_sweep_row`
@@ -185,7 +185,7 @@ Upstream also brought a `repo_dir()` resolver reading `DOROBOT_NEXUS_DIR`, which
 is most of item 2 already: the remaining work there is routing the other three
 call sites through it and stating a reason when it resolves to nothing.
 
-*Verified:* `cargo check` clean; `grep -c '#\[path' nexus-studio/src/nexus.rs` is 0; no `/Users/` path remains anywhere in the crate.
+*Verified:* `cargo check` clean; `grep -c '#\[path' nexus-studio/src/nexus.rs` is 0; no a user home directory path remains anywhere in the crate.
 
 ### 2. Make the engine discoverable (P1, ~2 h)
 

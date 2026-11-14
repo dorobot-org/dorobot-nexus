@@ -31,3 +31,11 @@ rfd = "0.15"
 
 [profile.release]
 opt-level = 3
+
+# Keep the renderer's Metal bindings consistent with its generated shader ABI.
+# See vendor/makepad-platform/NEXUS_PATCH.md for provenance and the small fix.
+[patch."https://github.com/makepad/makepad"]
+makepad-platform = { path = "vendor/makepad-platform" }
+
+[patch."https://github.com/dorobot-org/makepad-urdf-viewer"]
+makepad-urdf-player = { path = "vendor/makepad-urdf-player" }

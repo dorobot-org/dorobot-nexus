@@ -2067,7 +2067,7 @@ live_design! {
 - [Colors API](https://matplotlib.org/stable/api/colors_api.html)
 
 ### makepad-chart Source
-- Location: `/Users/yuechen/home/echart/makepad-chart`
+- Location: `/path/to/makepad-chart`
 - Key files:
   - `src/core/data.rs` - Data structures
   - `src/scale/linear.rs` - Scale implementation

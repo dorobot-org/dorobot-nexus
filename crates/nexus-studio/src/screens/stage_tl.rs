@@ -19,7 +19,7 @@ pub fn sync_mode_frame(app: &mut App, cx: &mut Cx) {
     if !comp.is_empty() {
         comp.set_visible(cx, app.st.mode == Mode::Scenes);
     }
-    let (wl, wr) = match app.st.mode {
+    let (mut wl, mut wr) = match app.st.mode {
         Mode::Scenes => (258.0, 312.0),
         Mode::Robots => (250.0, 320.0),
         Mode::Train => (196.0, 288.0),
@@ -29,6 +29,11 @@ pub fn sync_mode_frame(app: &mut App, cx: &mut Cx) {
         Mode::Deploy => (252.0, 336.0),
         Mode::Home => (252.0, 336.0),
     };
+    if app.window_width > 0. {
+        let scale = ((app.window_width - 212.) / (wl + wr)).clamp(0.45, 1.);
+        wl *= scale;
+        wr *= scale;
+    }
     {
         let mut rl = app.ui.view(cx, ids!(rail_l));
         if !rl.is_empty() {
@@ -96,10 +101,39 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         // there is no live height to guide against.
         let glv = stage.view(cx, ids!(glines));
         if !glv.is_empty() {
-            glv.set_visible(cx, app.st.mode != Mode::Robots);
+            let g1 = app
+                .st
+                .sel
+                .robot
+                .as_ref()
+                .and_then(|id| app.st.robots.iter().find(|r| &r.id == id))
+                .is_some_and(|r| r.name == "Unitree G1-29dof");
+            glv.set_visible(
+                cx,
+                app.st.mode != Mode::Robots
+                    && g1
+                    && !app.evaluation_visible()
+                    && app.simulation.is_none(),
+            );
         }
     }
     if let Some(path) = &urdf_path {
+        let second = app.evaluation_visible() && app.evaluation.second.is_some();
+        let rv_b = stage.robot_view(cx, ids!(urdf_wrap.rview_b));
+        rv_b.set_visible(cx, second);
+        if second && app.evaluation.second_model != *path {
+            let assets = std::path::Path::new(path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            match rv_b.load_robot(cx, path, &assets) {
+                Ok(()) => {
+                    app.evaluation.second_model = path.clone();
+                    rv_b.set_animating(cx, false);
+                }
+                Err(e) => app.st.toast(format!("Comparison model: {e}")),
+            }
+        }
         if app.loaded_urdf.as_deref() != Some(path.as_str()) {
             let assets = std::path::Path::new(path)
                 .parent()
@@ -160,26 +194,123 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
     // stage info line
     let r = app.st.sel.run.as_ref().and_then(|id| app.st.run(id));
     let info = match app.st.mode {
-        Mode::Scenes => format!("{} · {}{}", tt("scene"), sc.name, if app.st.dirty { format!("  {}", tt("● unsaved")) } else { String::new() }),
-        Mode::Robots => format!("{} · {}", tt("robot"), app.st.sel.robot.as_ref().and_then(|id| app.st.robots.iter().find(|r| &r.id == id)).map(|r| r.name.clone()).unwrap_or_default()),
+        Mode::Scenes => format!(
+            "{} · {}{}",
+            tt("scene"),
+            sc.name,
+            if app.st.dirty {
+                format!("  {}", tt("● unsaved"))
+            } else {
+                String::new()
+            }
+        ),
+        Mode::Robots => format!(
+            "{} · {}",
+            tt("robot"),
+            app.st
+                .sel
+                .robot
+                .as_ref()
+                .and_then(|id| app.st.robots.iter().find(|r| &r.id == id))
+                .map(|r| r.name.clone())
+                .unwrap_or_default()
+        ),
         Mode::Train => match r {
-            Some(r) => format!("{} · {} · {} {} — {}", tt("run"), r.name, tt("stance"), r.stage + 1, r.stages.get(r.stage).cloned().unwrap_or_default()),
+            Some(r) if r.set == "robot training task" => format!(
+                "Iteration {} / {} · {}",
+                r.iter, r.iters_per, app.external_motion.label
+            ),
+            Some(r) => format!(
+                "{} · {} · {} {} — {}",
+                tt("run"),
+                r.name,
+                tt("stance"),
+                r.stage + 1,
+                r.stages.get(r.stage).cloned().unwrap_or_default()
+            ),
             None => String::new(),
         },
-        Mode::Inspect => format!("{} · {} · {}", tt("probe"), app.st.sel.ck.clone().unwrap_or_else(|| "ck-2100k".into()), tt("deterministic")),
+        Mode::Inspect if app.simulation.is_some() => app
+            .simulation
+            .as_ref()
+            .map(|s| format!("Live physics · {} · {}", s.robot, s.state()))
+            .unwrap_or_default(),
+        Mode::Inspect => app
+            .replay
+            .as_ref()
+            .map(|r| format!("Recording · {}", r.name))
+            .unwrap_or_else(|| "Open a recording or select a policy checkpoint".into()),
+        Mode::Validate if app.evaluation_visible() => {
+            let r = app.evaluation.report.as_ref().unwrap();
+            let case = &r["results"][0][app.evaluation.case];
+            format!(
+                "{} · {} · seed {}",
+                if app.evaluation.second.is_some() {
+                    "A left · B right"
+                } else {
+                    "Measured evaluation · A"
+                },
+                case["case"].as_str().unwrap_or(""),
+                case["seed"]
+            )
+        }
+        Mode::Validate if app.external_robot_run().is_some() => app.external_motion.label.clone(),
         Mode::Validate => format!("{} · {}", tt("sweep"), app.st.sweep_ckpt),
         Mode::Runs => match r {
-            Some(r) => format!("{} · {} {}", tt("ledger"), if r.coll { tt("(kept checkpoints)") } else { r.name.clone() }, tt("(read-only)")),
+            Some(r) => format!(
+                "{} · {} {}",
+                tt("ledger"),
+                if r.coll {
+                    tt("(kept checkpoints)")
+                } else {
+                    r.name.clone()
+                },
+                tt("(read-only)")
+            ),
             None => String::new(),
         },
+        Mode::Deploy if !app.st.demo => app
+            .deployment
+            .session
+            .as_ref()
+            .map(|s| {
+                format!(
+                    "{} · {}",
+                    if s.status["agent"]["simulation"] == true {
+                        "Simulator agent"
+                    } else {
+                        "Robot agent"
+                    },
+                    s.agent_state()
+                )
+            })
+            .unwrap_or_else(|| "Connect a robot agent or local simulator target".into()),
         Mode::Deploy => {
             let lv = app.st.dg.armed.as_ref().and_then(|id| app.st.deploy(id));
             let tg_name = match &lv {
                 Some(d) => d.target.clone(),
-                None => app.st.dg.target.as_ref().and_then(|t| app.st.target(t)).map(|t| t.name.clone()).unwrap_or_else(|| "—".into()),
+                None => app
+                    .st
+                    .dg
+                    .target
+                    .as_ref()
+                    .and_then(|t| app.st.target(t))
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| "—".into()),
             };
             match lv {
-                Some(d) => format!("{} · {} · {}", tt("deploy"), tg_name, tf("stage {0} · {1}% torque cap", &[&(d.stage + 1).to_string(), &[40, 70, 100][d.stage].to_string()])),
+                Some(d) => format!(
+                    "{} · {} · {}",
+                    tt("deploy"),
+                    tg_name,
+                    tf(
+                        "stage {0} · {1}% torque cap",
+                        &[
+                            &(d.stage + 1).to_string(),
+                            &[40, 70, 100][d.stage].to_string()
+                        ]
+                    )
+                ),
                 None => format!("{} · {} · {}", tt("deploy"), tg_name, tt("candidate")),
             }
         }
@@ -192,9 +323,21 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         let show = app.st.mode == Mode::Inspect && app.st.cell_phys.is_some();
         banner.set_visible(cx, show);
         if let (true, Some((f, g))) = (show, app.st.cell_phys) {
-            let btxt = tf("physics from sweep cell — gain {0} · friction {1}", &[&format!("{g:.2}"), &format!("{f:.2}")]);
+            let btxt = tf(
+                "physics from sweep cell — gain {0} · friction {1}",
+                &[&format!("{g:.2}"), &format!("{f:.2}")],
+            );
             set_label(cx, &stage, ids!(banner.bl.lbl), &btxt, l);
-            set_btn(cx, &stage, ids!(banner.bl.clr), &tt("clear"), true, false, true, l);
+            set_btn(
+                cx,
+                &stage,
+                ids!(banner.bl.clr),
+                &tt("clear"),
+                true,
+                false,
+                true,
+                l,
+            );
         }
     }
 
@@ -203,15 +346,18 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
     if tlw.is_empty() {
         return;
     }
+
     {
         let mut p = app.ui.view(cx, ids!(tl));
         script_apply_eval!(cx, p, { draw_bg +: { light: #(l as f64) } });
     }
     let mode = app.st.mode;
-    let frames_v = matches!(mode, Mode::Scenes | Mode::Inspect);
+    let external_validation =
+        mode == Mode::Validate && (app.external_robot_run().is_some() || app.evaluation_visible());
+    let frames_v = matches!(mode, Mode::Scenes | Mode::Inspect) || external_validation;
     let run_v = matches!(mode, Mode::Train | Mode::Runs);
-    let sweep_v = mode == Mode::Validate;
-    let deploy_v = mode == Mode::Deploy;
+    let sweep_v = mode == Mode::Validate && !external_validation;
+    let deploy_v = mode == Mode::Deploy && app.st.demo;
     let note_v = mode == Mode::Robots;
     for (p, v) in [
         (ids!(sec_frames), frames_v),
@@ -228,13 +374,92 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
     if frames_v {
         let frac = app.st.live.frame as f64 / app.st.live.frames.max(1) as f64;
         tlw.scrub(cx, ids!(sec_frames.scrub)).set(cx, frac, l);
-        set_btn(cx, &tlw, ids!(sec_frames.row.b_start), "|◀", true, false, true, l);
-        set_btn(cx, &tlw, ids!(sec_frames.row.b_back), "◀", true, false, true, l);
-        set_btn(cx, &tlw, ids!(sec_frames.row.b_play), if app.st.live.playing { "▮▮" } else { "▶" }, true, true, true, l);
-        set_btn(cx, &tlw, ids!(sec_frames.row.b_fwd), "▶", true, false, true, l);
-        set_btn(cx, &tlw, ids!(sec_frames.row.b_resim), &tt("re-simulate"), true, false, true, l);
-        set_btn(cx, &tlw, ids!(sec_frames.row.b_record), &tt("● record"), true, false, true, l);
-        let fl = format!("{} / {}", app.st.live.frame, app.st.live.frames.saturating_sub(1));
+        set_btn(
+            cx,
+            &tlw,
+            ids!(sec_frames.row.b_start),
+            "|◀",
+            true,
+            false,
+            true,
+            l,
+        );
+        set_btn(
+            cx,
+            &tlw,
+            ids!(sec_frames.row.b_back),
+            "◀",
+            true,
+            false,
+            true,
+            l,
+        );
+        set_btn(
+            cx,
+            &tlw,
+            ids!(sec_frames.row.b_play),
+            if app
+                .simulation
+                .as_ref()
+                .is_some_and(|s| s.state() == "running")
+                || app.st.live.playing
+            {
+                "▮▮"
+            } else {
+                "▶"
+            },
+            true,
+            true,
+            true,
+            l,
+        );
+        set_btn(
+            cx,
+            &tlw,
+            ids!(sec_frames.row.b_fwd),
+            "▶",
+            true,
+            false,
+            true,
+            l,
+        );
+        set_btn(
+            cx,
+            &tlw,
+            ids!(sec_frames.row.b_resim),
+            &tt(if app.simulation.is_some() {
+                "Restart"
+            } else {
+                "re-simulate"
+            }),
+            !external_validation,
+            false,
+            !external_validation,
+            l,
+        );
+        set_btn(
+            cx,
+            &tlw,
+            ids!(sec_frames.row.b_record),
+            &tt(if app.simulation.is_some() {
+                "Save"
+            } else {
+                "Save replay"
+            }),
+            true,
+            false,
+            true,
+            l,
+        );
+        let fl = if let Some(s) = &app.simulation {
+            format!("{} steps", s.status["sequence"].as_u64().unwrap_or(0))
+        } else {
+            format!(
+                "{} / {}",
+                app.st.live.frame,
+                app.st.live.frames.saturating_sub(1)
+            )
+        };
         set_label(cx, &tlw, ids!(sec_frames.row.frame_lbl), &fl, l);
     }
     if run_v {
@@ -268,7 +493,22 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
                         format!("{:.0}", app.st.live.sps),
                         "—".to_string(),
                         "—".to_string(),
-                        "—".to_string(),
+                        app.real_proc
+                            .as_ref()
+                            .filter(|p| p.run_id.as_deref() == Some(r.id.as_str()))
+                            .and_then(|p| p.train.as_ref())
+                            .and_then(|h| {
+                                h.shared.lock().ok().and_then(|g| {
+                                    g.samples.last().map(|s| {
+                                        if s.fall_rate_unmeasured {
+                                            "not measured".into()
+                                        } else {
+                                            format!("{:.1}", s.episode_len)
+                                        }
+                                    })
+                                })
+                            })
+                            .unwrap_or_else(|| "—".into()),
                     )
                 } else {
                     (
@@ -278,17 +518,33 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
                         "61".into(),
                     )
                 };
-                let vals = [
+                let mut vals = [
                     (tt("reward"), format!("{:.4}", app.st.live.reward)),
-                    (tt("falls"), format!("{:.1}%", app.st.live.falls)),
+                    (
+                        tt("falls"),
+                        if app.st.live.falls_unmeasured {
+                            "not measured".into()
+                        } else {
+                            format!("{:.1}%", app.st.live.falls)
+                        },
+                    ),
                     ("steps/s".into(), sps),
                     ("KL".into(), kl),
                     ("lr".into(), lr),
                     (tt("ep len"), ep),
                 ];
+                if !app.st.demo && r.metrics.is_empty() {
+                    for value in vals.iter_mut().take(3) {
+                        value.1 = "—".into();
+                    }
+                }
                 let tpaths = [
-                    ids!(sec_run.tiles.tile0), ids!(sec_run.tiles.tile1), ids!(sec_run.tiles.tile2),
-                    ids!(sec_run.tiles.tile3), ids!(sec_run.tiles.tile4), ids!(sec_run.tiles.tile5),
+                    ids!(sec_run.tiles.tile0),
+                    ids!(sec_run.tiles.tile1),
+                    ids!(sec_run.tiles.tile2),
+                    ids!(sec_run.tiles.tile3),
+                    ids!(sec_run.tiles.tile4),
+                    ids!(sec_run.tiles.tile5),
                 ];
                 for (j, tp) in tpaths.iter().enumerate() {
                     let tile = tlw.widget(cx, *tp);
@@ -305,7 +561,13 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
             if !note.is_empty() {
                 note.set_visible(cx, mode == Mode::Runs);
                 if mode == Mode::Runs {
-                    set_label(cx, &tlw, ids!(sec_run.ro_note), &tt("read-only — this run has ended"), l);
+                    set_label(
+                        cx,
+                        &tlw,
+                        ids!(sec_run.ro_note),
+                        &tt("read-only — this run has ended"),
+                        l,
+                    );
                 }
             }
         }
@@ -314,7 +576,14 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         // One surface, one path. There used to be two grids here — the
         // engine's and a fixture — with a branch picking whichever was set,
         // so the same panel could be showing either and did not say which.
-        tlw.heat(cx, ids!(sec_sweep.heat)).set(cx, app.st.sweep_grid.as_ref(), app.st.sweep_at, app.st.sel.cell, l, false);
+        tlw.heat(cx, ids!(sec_sweep.heat)).set(
+            cx,
+            app.st.sweep_grid.as_ref(),
+            app.st.sweep_at,
+            app.st.sel.cell,
+            l,
+            false,
+        );
         // The axes the *engine* varied, when a sweep has run: the zealot arm
         // varies gain and friction, the built-in one mass and force, and the
         // recipe's own labels describe neither once a real sweep has answered.
@@ -323,23 +592,57 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
             .real_proc
             .as_ref()
             .and_then(|p| p.axes())
-            .unwrap_or_else(|| format!(
-                "Y {} — {}   ·   X {} — {}",
-                rc.fr.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" "),
-                tt(rc.yl),
-                rc.ga.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" "),
-                tt(rc.xl)
-            ));
+            .unwrap_or_else(|| {
+                format!(
+                    "Y {} — {}   ·   X {} — {}",
+                    rc.fr
+                        .iter()
+                        .map(|v| format!("{v:.2}"))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    tt(rc.yl),
+                    rc.ga
+                        .iter()
+                        .map(|v| format!("{v:.2}"))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    tt(rc.xl)
+                )
+            });
         set_label(cx, &tlw, ids!(sec_sweep.ax), &ax, l);
         let sttxt = match app.st.sweep_state {
-            SweepState::Idle => tt("No surface yet — run the sweep from the left rail. 40 cells · 12 episodes each."),
+            SweepState::Idle => tt(
+                "No surface yet — run the sweep from the left rail. 40 cells · 12 episodes each.",
+            ),
             SweepState::Running => tf("sweeping {0}/40", &[&app.st.sweep_at.to_string()]),
-            SweepState::Aborted => tf("abandoned at {0}/40 — partial kept", &[&app.st.sweep_at.to_string()]),
+            SweepState::Aborted => tf(
+                "abandoned at {0}/40 — partial kept",
+                &[&app.st.sweep_at.to_string()],
+            ),
             SweepState::Complete => tt("complete"),
         };
-        set_chip(cx, &tlw, ids!(sec_sweep.chips.st_chip), &sttxt, None, false, l);
-        let pass = tf("{0}% of measured cells pass", &[&app.st.sweep_pass().to_string()]);
-        set_chip(cx, &tlw, ids!(sec_sweep.chips.pass_chip), &pass, None, false, l);
+        set_chip(
+            cx,
+            &tlw,
+            ids!(sec_sweep.chips.st_chip),
+            &sttxt,
+            None,
+            false,
+            l,
+        );
+        let pass = tf(
+            "{0}% of measured cells pass",
+            &[&app.st.sweep_pass().to_string()],
+        );
+        set_chip(
+            cx,
+            &tlw,
+            ids!(sec_sweep.chips.pass_chip),
+            &pass,
+            None,
+            false,
+            l,
+        );
         let has_cell = app.st.sel.cell.is_some() && app.st.sweep_grid.is_some();
         let cc = tlw.view(cx, ids!(sec_sweep.chips.cell_chip));
         if !cc.is_empty() {
@@ -347,13 +650,54 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         }
         if let (Some((ri, ci)), Some(grid)) = (app.st.sel.cell, app.st.sweep_grid.as_ref()) {
             let v = grid[ri][ci];
-            let vtxt = v.map(|v| format!("{v:.2}")).unwrap_or_else(|| tt("unmeasured"));
-            let ctxt = tf("gain {0} · friction {1} → {2}", &[&format!("{:.2}", rc.ga[ci]), &format!("{:.2}", rc.fr[ri]), &vtxt]);
-            set_chip(cx, &tlw, ids!(sec_sweep.chips.cell_chip), &ctxt, None, false, l);
+            let vtxt = v
+                .map(|v| format!("{v:.2}"))
+                .unwrap_or_else(|| tt("unmeasured"));
+            let ctxt = tf(
+                "gain {0} · friction {1} → {2}",
+                &[
+                    &format!("{:.2}", rc.ga[ci]),
+                    &format!("{:.2}", rc.fr[ri]),
+                    &vtxt,
+                ],
+            );
+            set_chip(
+                cx,
+                &tlw,
+                ids!(sec_sweep.chips.cell_chip),
+                &ctxt,
+                None,
+                false,
+                l,
+            );
         }
-        set_btn(cx, &tlw, ids!(sec_sweep.chips.b_cell_inspect), &tt("open in Inspect"), has_cell, false, true, l);
-        set_btn(cx, &tlw, ids!(sec_sweep.chips.b_cell_scene), &tt("save as scene"), has_cell, false, true, l);
-        set_label(cx, &tlw, ids!(sec_sweep.chips.grey_note), &tt("grey = unmeasured, not zero"), l);
+        set_btn(
+            cx,
+            &tlw,
+            ids!(sec_sweep.chips.b_cell_inspect),
+            &tt("open in Inspect"),
+            has_cell,
+            false,
+            true,
+            l,
+        );
+        set_btn(
+            cx,
+            &tlw,
+            ids!(sec_sweep.chips.b_cell_scene),
+            &tt("save as scene"),
+            has_cell,
+            false,
+            true,
+            l,
+        );
+        set_label(
+            cx,
+            &tlw,
+            ids!(sec_sweep.chips.grey_note),
+            &tt("grey = unmeasured, not zero"),
+            l,
+        );
 
         // MuJoCo sim-to-sim, below the surface. Present only once a run has
         // been started — an empty table of dashes reads as a measurement that
@@ -365,10 +709,18 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         if let Some(job) = &app.mj {
             let (label, done, rows) = job.view();
             let running = job.running();
-            set_label(cx, &tlw, ids!(sec_sweep.mj.mj_cap.lbl), &caps(&tt("Sim-to-sim · MuJoCo")), l);
+            set_label(
+                cx,
+                &tlw,
+                ids!(sec_sweep.mj.mj_cap.lbl),
+                &caps(&tt("Sim-to-sim · MuJoCo")),
+                l,
+            );
             let paths = [
-                ids!(sec_sweep.mj.mj_r0), ids!(sec_sweep.mj.mj_r1),
-                ids!(sec_sweep.mj.mj_r2), ids!(sec_sweep.mj.mj_r3),
+                ids!(sec_sweep.mj.mj_r0),
+                ids!(sec_sweep.mj.mj_r1),
+                ids!(sec_sweep.mj.mj_r2),
+                ids!(sec_sweep.mj.mj_r3),
             ];
             for (row, p) in rows.iter().zip(paths.iter()) {
                 let rw = tlw.widget(cx, *p);
@@ -406,15 +758,33 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
             (1.0, gtone(&g.compat)),
             (1.0, gtone(&g.sim2sim)),
             (1.0, gtone(&g.dryrun)),
-            (1.0, if g.chk_ok() { SegTone::Ok } else { SegTone::Sink }),
+            (
+                1.0,
+                if g.chk_ok() {
+                    SegTone::Ok
+                } else {
+                    SegTone::Sink
+                },
+            ),
         ];
-        segs.push((1.0, match live {
-            Some(d) if d.stage == 2 => SegTone::Ok,
-            Some(_) => SegTone::Vio,
-            None => SegTone::Sink,
-        }));
+        segs.push((
+            1.0,
+            match live {
+                Some(d) if d.stage == 2 => SegTone::Ok,
+                Some(_) => SegTone::Vio,
+                None => SegTone::Sink,
+            },
+        ));
         tlw.segsbar(cx, ids!(sec_deploy.gsegs)).set(cx, segs, l);
-        let labels = [tt("export"), tt("compat"), tt("sim-to-sim"), tt("dry-run"), tt("checklist"), tt("rollout")].join(" · ");
+        let labels = [
+            tt("export"),
+            tt("compat"),
+            tt("sim-to-sim"),
+            tt("dry-run"),
+            tt("checklist"),
+            tt("rollout"),
+        ]
+        .join(" · ");
         set_label(cx, &tlw, ids!(sec_deploy.glabels), &labels, l);
         let note = match live {
             Some(d) => tf("live on {0} at {1}% torque cap — E-STOP is in the right rail", &[&d.target, &[40, 70, 100][d.stage].to_string()]),
@@ -423,7 +793,7 @@ pub fn sync_stage_tl(app: &mut App, cx: &mut Cx) {
         set_label(cx, &tlw, ids!(sec_deploy.gnote), &note, l);
     }
     if note_v {
-        set_label(cx, &tlw, ids!(sec_note.nl), &tt("Import runs a six-step gate: parse, assets, structure, rehearse, map, commit. A URDF that loads is not a URDF that trains."), l);
+        set_label(cx, &tlw, ids!(sec_note.nl), "Import copies geometry, materials and textures. Task settings configure physics and learning; training and policy validation produce separate evidence.", l);
     }
 }
 
@@ -437,6 +807,40 @@ pub fn route_stage_tl(app: &mut App, cx: &mut Cx, actions: &Actions) {
     if tlw.is_empty() {
         return;
     }
+    if let Some(session) = &app.simulation {
+        let running = session.state() == "running";
+        let action = if tlw
+            .button(cx, ids!(sec_frames.row.b_record))
+            .clicked(actions)
+        {
+            Some("sim-save")
+        } else if tlw
+            .button(cx, ids!(sec_frames.row.b_start))
+            .clicked(actions)
+            || tlw
+                .button(cx, ids!(sec_frames.row.b_resim))
+                .clicked(actions)
+        {
+            Some("sim-restart")
+        } else if tlw.button(cx, ids!(sec_frames.row.b_play)).clicked(actions) {
+            Some(if running { "sim-pause" } else { "sim-resume" })
+        } else if tlw.button(cx, ids!(sec_frames.row.b_fwd)).clicked(actions) {
+            Some("sim-step")
+        } else if tlw.button(cx, ids!(sec_frames.row.b_back)).clicked(actions)
+            || tlw
+                .scrub(cx, ids!(sec_frames.scrub))
+                .seeked(actions)
+                .is_some()
+        {
+            Some("sim-pause")
+        } else {
+            None
+        };
+        if let Some(action) = action {
+            app.dispatch_named(cx, action, "");
+        }
+        return;
+    }
     if let Some(f) = tlw.scrub(cx, ids!(sec_frames.scrub)).seeked(actions) {
         app.st.live.frame = (f * (app.st.live.frames.saturating_sub(1)) as f64).round() as u32;
         app.st.live.playing = false;
@@ -444,7 +848,10 @@ pub fn route_stage_tl(app: &mut App, cx: &mut Cx, actions: &Actions) {
         app.redraw_ui(cx);
         return;
     }
-    if tlw.button(cx, ids!(sec_frames.row.b_start)).clicked(actions) {
+    if tlw
+        .button(cx, ids!(sec_frames.row.b_start))
+        .clicked(actions)
+    {
         app.st.live.frame = 0;
         app.st.live.playing = true;
         app.sync_all(cx);
@@ -467,12 +874,18 @@ pub fn route_stage_tl(app: &mut App, cx: &mut Cx, actions: &Actions) {
         app.sync_all(cx);
         return;
     }
-    if tlw.button(cx, ids!(sec_frames.row.b_resim)).clicked(actions) {
+    if tlw
+        .button(cx, ids!(sec_frames.row.b_resim))
+        .clicked(actions)
+    {
         app.st.resim();
         app.sync_all(cx);
         return;
     }
-    if tlw.button(cx, ids!(sec_frames.row.b_record)).clicked(actions) {
+    if tlw
+        .button(cx, ids!(sec_frames.row.b_record))
+        .clicked(actions)
+    {
         app.dispatch_named(cx, "record-probe", "");
         return;
     }
@@ -490,11 +903,17 @@ pub fn route_stage_tl(app: &mut App, cx: &mut Cx, actions: &Actions) {
             }
         }
     }
-    if tlw.button(cx, ids!(sec_sweep.chips.b_cell_inspect)).clicked(actions) {
+    if tlw
+        .button(cx, ids!(sec_sweep.chips.b_cell_inspect))
+        .clicked(actions)
+    {
         app.dispatch_named(cx, "cell-inspect", "");
         return;
     }
-    if tlw.button(cx, ids!(sec_sweep.chips.b_cell_scene)).clicked(actions) {
+    if tlw
+        .button(cx, ids!(sec_sweep.chips.b_cell_scene))
+        .clicked(actions)
+    {
         app.dispatch_named(cx, "cell-scene", "");
     }
 }
@@ -516,9 +935,31 @@ pub fn sync_composer(app: &mut App, cx: &mut Cx) {
         let mut p = app.ui.view(cx, ids!(composer));
         script_apply_eval!(cx, p, { draw_bg +: { light: #(l as f64) } });
     }
-    let Some(set) = app.st.sel.set.as_ref().and_then(|id| app.st.set(id)).cloned() else { return };
-    set_label(cx, &comp, ids!(cap), &format!("{} · {}", caps(&tt("Set")), set.name), l);
-    let rpaths = [ids!(rung0), ids!(rung1), ids!(rung2), ids!(rung3), ids!(rung4), ids!(rung5)];
+    let Some(set) = app
+        .st
+        .sel
+        .set
+        .as_ref()
+        .and_then(|id| app.st.set(id))
+        .cloned()
+    else {
+        return;
+    };
+    set_label(
+        cx,
+        &comp,
+        ids!(cap),
+        &format!("{} · {}", caps(&tt("Set")), set.name),
+        l,
+    );
+    let rpaths = [
+        ids!(rung0),
+        ids!(rung1),
+        ids!(rung2),
+        ids!(rung3),
+        ids!(rung4),
+        ids!(rung5),
+    ];
     for (i, rp) in rpaths.iter().enumerate() {
         let rung = comp.widget(cx, *rp);
         if rung.is_empty() {
@@ -547,11 +988,55 @@ pub fn sync_composer(app: &mut App, cx: &mut Cx) {
             None => rung.set_visible(cx, false),
         }
     }
-    set_btn(cx, &comp, ids!(b_add), &tt("+ add selected"), true, false, true, l);
-    set_btn(cx, &comp, ids!(b_rename), &tt("rename"), true, false, true, l);
-    set_btn(cx, &comp, ids!(b_dup), &tt("duplicate set"), true, false, true, l);
-    set_chip(cx, &comp, ids!(budget), &tt("400 it × 6 rounds"), None, false, l);
-    set_btn(cx, &comp, ids!(b_train), &tt("Train this set →"), true, true, true, l);
+    set_btn(
+        cx,
+        &comp,
+        ids!(b_add),
+        &tt("+ add selected"),
+        true,
+        false,
+        true,
+        l,
+    );
+    set_btn(
+        cx,
+        &comp,
+        ids!(b_rename),
+        &tt("rename"),
+        true,
+        false,
+        true,
+        l,
+    );
+    set_btn(
+        cx,
+        &comp,
+        ids!(b_dup),
+        &tt("duplicate set"),
+        true,
+        false,
+        true,
+        l,
+    );
+    set_chip(
+        cx,
+        &comp,
+        ids!(budget),
+        &tt("400 it × 6 rounds"),
+        None,
+        false,
+        l,
+    );
+    set_btn(
+        cx,
+        &comp,
+        ids!(b_train),
+        &tt("Train this set →"),
+        true,
+        true,
+        true,
+        l,
+    );
 }
 
 pub fn route_composer(app: &mut App, cx: &mut Cx, actions: &Actions) {
@@ -577,7 +1062,14 @@ pub fn route_composer(app: &mut App, cx: &mut Cx, actions: &Actions) {
         app.dispatch_named(cx, "train-set", "");
         return;
     }
-    let rpaths = [ids!(rung0), ids!(rung1), ids!(rung2), ids!(rung3), ids!(rung4), ids!(rung5)];
+    let rpaths = [
+        ids!(rung0),
+        ids!(rung1),
+        ids!(rung2),
+        ids!(rung3),
+        ids!(rung4),
+        ids!(rung5),
+    ];
     for (i, rp) in rpaths.iter().enumerate() {
         let rung = comp.widget(cx, *rp);
         if rung.is_empty() {
@@ -603,7 +1095,9 @@ pub fn route_composer(app: &mut App, cx: &mut Cx, actions: &Actions) {
 
 /// 120ms path: update only the scrub fill + frame counter — no VM applies.
 pub fn sync_transport_fast(app: &mut App, cx: &mut Cx) {
-    if !matches!(app.st.mode, Mode::Scenes | Mode::Inspect) {
+    if !matches!(app.st.mode, Mode::Scenes | Mode::Inspect)
+        && !(app.st.mode == Mode::Validate && app.external_robot_run().is_some())
+    {
         return;
     }
     let tlw = app.ui.widget(cx, ids!(tl));
@@ -613,7 +1107,11 @@ pub fn sync_transport_fast(app: &mut App, cx: &mut Cx) {
     let l = app.light();
     let frac = app.st.live.frame as f64 / app.st.live.frames.max(1) as f64;
     tlw.scrub(cx, ids!(sec_frames.scrub)).set(cx, frac, l);
-    let fl = format!("{} / {}", app.st.live.frame, app.st.live.frames.saturating_sub(1));
+    let fl = format!(
+        "{} / {}",
+        app.st.live.frame,
+        app.st.live.frames.saturating_sub(1)
+    );
     let lb = tlw.label(cx, ids!(sec_frames.row.frame_lbl));
     if !lb.is_empty() {
         lb.set_text(cx, &fl);
@@ -631,16 +1129,47 @@ pub fn sync_sweep_fast(app: &mut App, cx: &mut Cx) {
     }
     let l = app.light();
     let lang = app.st.lang;
-    tlw.heat(cx, ids!(sec_sweep.heat)).set(cx, app.st.sweep_grid.as_ref(), app.st.sweep_at, app.st.sel.cell, l, false);
+    tlw.heat(cx, ids!(sec_sweep.heat)).set(
+        cx,
+        app.st.sweep_grid.as_ref(),
+        app.st.sweep_at,
+        app.st.sel.cell,
+        l,
+        false,
+    );
     let sttxt = match app.st.sweep_state {
         SweepState::Running => trf(lang, "sweeping {0}/40", &[&app.st.sweep_at.to_string()]),
         SweepState::Complete => tr(lang, "complete").to_string(),
-        SweepState::Aborted => trf(lang, "aborted at {0}/40 — partial kept", &[&app.st.sweep_at.to_string()]),
+        SweepState::Aborted => trf(
+            lang,
+            "aborted at {0}/40 — partial kept",
+            &[&app.st.sweep_at.to_string()],
+        ),
         SweepState::Idle => return,
     };
-    set_chip(cx, &tlw, ids!(sec_sweep.chips.st_chip), &sttxt, None, false, l);
-    let pass = trf(lang, "{0}% of measured cells pass", &[&app.st.sweep_pass().to_string()]);
-    set_chip(cx, &tlw, ids!(sec_sweep.chips.pass_chip), &pass, None, false, l);
+    set_chip(
+        cx,
+        &tlw,
+        ids!(sec_sweep.chips.st_chip),
+        &sttxt,
+        None,
+        false,
+        l,
+    );
+    let pass = trf(
+        lang,
+        "{0}% of measured cells pass",
+        &[&app.st.sweep_pass().to_string()],
+    );
+    set_chip(
+        cx,
+        &tlw,
+        ids!(sec_sweep.chips.pass_chip),
+        &pass,
+        None,
+        false,
+        l,
+    );
 }
 
 // --------------------------------------------------------------- toasts --
@@ -660,7 +1189,16 @@ pub fn sync_toasts(app: &mut App, cx: &mut Cx) {
                 tv.set_visible(cx, true);
                 set_label(cx, &tv, ids!(lbl), &toast.text, l);
                 let undo_lbl = if app.st.lang == 1 { "撤销" } else { "Undo" };
-                set_btn(cx, &tv, ids!(undo), undo_lbl, toast.undo.is_some(), false, true, l);
+                set_btn(
+                    cx,
+                    &tv,
+                    ids!(undo),
+                    undo_lbl,
+                    toast.undo.is_some(),
+                    false,
+                    true,
+                    l,
+                );
                 let mut bg = tv.clone();
                 script_apply_eval!(cx, bg, { draw_bg +: { light: #(l as f64) } });
             }

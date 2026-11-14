@@ -25,10 +25,14 @@ fn wants_json() -> bool {
 /// contract other products consume is the JSON beside it, not this.
 fn sample_line(s: &trainer::Sample) -> String {
     format!(
-        "{:>9} steps  reward {:>6.3}  falls {:>5.1}%  ep_len {:>5.0}  {:>6.0}k steps/s",
+        "{:>9} steps  reward {:>6.3}  falls {}  ep_len {:>5.0}  {:>6.0}k steps/s",
         s.step,
         s.reward,
-        s.fall_rate * 100.0,
+        if s.fall_rate_unmeasured {
+            "not measured".into()
+        } else {
+            format!("{:.1}%", s.fall_rate * 100.0)
+        },
         s.episode_len,
         s.steps_per_sec / 1000.0
     )
@@ -50,6 +54,7 @@ fn sample_json(s: &trainer::Sample) -> String {
         .int("step", s.step)
         .f32("reward", s.reward, 5)
         .f32("fall_rate", s.fall_rate, 5)
+        .bool("fall_rate_measured", !s.fall_rate_unmeasured)
         .f32("episode_len", s.episode_len, 2)
         .num("steps_per_sec", s.steps_per_sec, 1)
         .obj("terms", terms)
@@ -70,36 +75,50 @@ fn headless(total: u64) -> ! {
     let randomize = !std::env::args().any(|a| a == "--no-random");
     let json = wants_json();
 
-    // With --features zealot and a built stack, the same loop reports zealot's
-    // GPU run. `total` stays a budget in env-steps for both backends: zealot
-    // counts iterations, and at 256 envs it emits 24 steps per env per
-    // iteration, so the budget converts rather than changing meaning.
-    // The checkpoint is `zealot_ckpt_path()`, not a literal: --crosssim and
-    // --mujoco already resolve it through DOROBOT_ZEALOT_CKPT, and training to
-    // a different file than the validators read is how a run gets scored
-    // against a stale policy.
-    #[cfg(feature = "zealot")]
-    let (h, backend, note) = match zealot::spawn(
-        envs,
-        (total / (envs as u64 * 24)).max(1),
-        &zealot_ckpt_path(),
-    ) {
-        Some(h) => (h, "zealot", zealot::binary_path().display().to_string()),
-        None => (
-            trainer::spawn_with(envs, total, 1, randomize),
+    if total == 0 {
+        fail(json, "training budget must be positive");
+    }
+    let run = std::env::var("NEXUS_RUN_ID").unwrap_or_else(|_| {
+        format!(
+            "cli-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
+    });
+    if !ckpt::valid_id(&run) {
+        fail(json, "invalid NEXUS_RUN_ID");
+    }
+    let dir = ckpt::run_dir(&run);
+    if dir.exists() {
+        fail(
+            json,
+            "run directory already exists; choose a fresh NEXUS_RUN_ID",
+        );
+    }
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        fail(json, &e.to_string());
+    }
+    let artifact = dir.join("policy.safetensors");
+    let use_gpu =
+        cfg!(feature = "zealot") && std::env::var("NEXUS_BACKEND").as_deref() != Ok("cpu");
+    let (h, backend, note) = if use_gpu {
+        let Some(h) = zealot::spawn(
+            envs,
+            total.div_ceil(envs as u64 * 24),
+            &artifact.to_string_lossy(),
+        ) else {
+            fail(json, "G1 trainer unavailable; run scripts/setup-zealot.sh or explicitly set NEXUS_BACKEND=cpu");
+        };
+        (h, "zealot", artifact.display().to_string())
+    } else {
+        (
+            trainer::spawn_named(envs, total, 1, randomize, &run),
             "cpu",
-            format!(
-                "no zealot binary at {}; run scripts/setup-zealot.sh",
-                zealot::binary_path().display()
-            ),
-        ),
+            dir.display().to_string(),
+        )
     };
-    #[cfg(not(feature = "zealot"))]
-    let (h, backend, note) = (
-        trainer::spawn_with(envs, total, 1, randomize),
-        "cpu",
-        String::from("built without the zealot feature"),
-    );
 
     // Which backend ran is part of the result, not decoration: the same command
     // means different physics on a machine with the GPU stack built.
@@ -108,6 +127,7 @@ fn headless(total: u64) -> ! {
             "{}",
             json::Obj::new()
                 .str("event", "start")
+                .str("run", &run)
                 .str("backend", backend)
                 .str("backend_note", &note)
                 .usize("envs", envs)
@@ -116,10 +136,11 @@ fn headless(total: u64) -> ! {
                 .done()
         );
     } else {
-        println!("backend: {backend} ({note})");
+        println!("run: {run} · backend: {backend} ({note})");
     }
 
     let mut shown = 0usize;
+    let mut last_step = 0;
     loop {
         std::thread::sleep(std::time::Duration::from_millis(250));
         // Take every interval published since the last poll, not just the
@@ -127,10 +148,19 @@ fn headless(total: u64) -> ! {
         // stream that silently drops rows is worse than one that is late.
         let (fresh, done) = {
             let g = h.shared.lock().unwrap();
-            let from = shown.min(g.samples.len());
-            (g.samples[from..].to_vec(), !g.running)
+            (
+                g.samples
+                    .iter()
+                    .filter(|s| s.step > last_step)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                !g.running,
+            )
         };
         shown += fresh.len();
+        if let Some(s) = fresh.last() {
+            last_step = s.step;
+        }
         for s in &fresh {
             println!("{}", if json { sample_json(s) } else { sample_line(s) });
         }
@@ -139,6 +169,9 @@ fn headless(total: u64) -> ! {
         }
     }
 
+    if let Some(error) = h.shared.lock().unwrap().error.clone() {
+        fail(json, &error);
+    }
     if json {
         println!(
             "{}",
@@ -167,7 +200,11 @@ fn headless_sweep() -> ! {
                 let mass: Vec<f32> = (0..sweep::ROWS).map(sweep::axis_mass).collect();
                 let force: Vec<f32> = (0..sweep::COLS).map(sweep::axis_force).collect();
                 let cells: Vec<Vec<Option<f64>>> = (0..sweep::ROWS)
-                    .map(|r| (0..sweep::COLS).map(|c| g.cell(r, c).map(f64::from)).collect())
+                    .map(|r| {
+                        (0..sweep::COLS)
+                            .map(|c| g.cell(r, c).map(f64::from))
+                            .collect()
+                    })
                     .collect();
                 println!(
                     "{}",
@@ -182,9 +219,13 @@ fn headless_sweep() -> ! {
                         .done()
                 );
             } else {
-                println!("mass\\force   {}", (0..sweep::COLS)
-                    .map(|c| format!("{:>5.2}", sweep::axis_force(c)))
-                    .collect::<Vec<_>>().join(" "));
+                println!(
+                    "mass\\force   {}",
+                    (0..sweep::COLS)
+                        .map(|c| format!("{:>5.2}", sweep::axis_force(c)))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
                 for r in 0..sweep::ROWS {
                     let cells: Vec<String> = (0..sweep::COLS)
                         .map(|c| match g.cell(r, c) {
@@ -234,7 +275,9 @@ fn track_check() -> ! {
             env.observe(0, &mut obs);
             sum_dx += obs[1];
             n += 1;
-            if o.done[0] { break; }
+            if o.done[0] {
+                break;
+            }
         }
         let dx = sum_dx / n.max(1) as f32;
         let tracked = (-3.0 * (dx - cmd).abs()).exp();
@@ -305,7 +348,11 @@ pub fn zealot_ckpt_path() -> String {
 /// guessing from a filename.
 fn capabilities() -> ! {
     let json = wants_json();
-    let features: &[&str] = if cfg!(feature = "zealot") { &["zealot"] } else { &[] };
+    let features: &[&str] = if cfg!(feature = "zealot") {
+        &["zealot"]
+    } else {
+        &[]
+    };
 
     // Compiled in is not the same as usable. zealot is driven as a subprocess,
     // so the feature says only that the client exists; the binary decides
@@ -354,7 +401,11 @@ fn capabilities() -> ! {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         println!(
             "features:     {}",
-            if features.is_empty() { "(none)".to_string() } else { features.join(" ") }
+            if features.is_empty() {
+                "(none)".to_string()
+            } else {
+                features.join(" ")
+            }
         );
         println!("backends:     {}", backends.join(" "));
         println!("entry points: {}", entry_points.join(" "));
@@ -383,8 +434,8 @@ fn headless_crosssim(run: &str) -> ! {
     // Mirror the GUI's preference: with a built zealot stack the meaningful
     // comparison is decimation against decimation, not Euler against RK4.
     #[cfg(feature = "zealot")]
-    let started = crosssim::zealot_cross::spawn(&zealot_ckpt_path())
-        .or_else(|| crosssim::spawn(run));
+    let started =
+        crosssim::zealot_cross::spawn(&zealot_ckpt_path()).or_else(|| crosssim::spawn(run));
     #[cfg(not(feature = "zealot"))]
     let started = crosssim::spawn(run);
 
@@ -478,17 +529,24 @@ fn headless_mujoco(ckpt: &str) -> ! {
                 );
             } else {
                 println!("MuJoCo sim-to-sim · obs frame {}", r.obs_frame);
-                println!("{:<12} {:>8} {:>10} {:>8}", "attempt", "seconds", "metres", "outcome");
+                println!(
+                    "{:<12} {:>8} {:>10} {:>8}",
+                    "attempt", "seconds", "metres", "outcome"
+                );
                 for (i, a) in r.attempts.iter().enumerate() {
                     println!(
                         "{:<12} {:>8.1} {:>10.2} {:>8}",
-                        i, a.seconds, a.metres,
+                        i,
+                        a.seconds,
+                        a.metres,
                         if a.fell { "fell" } else { "held" }
                     );
                 }
                 println!(
                     "\ncommanded {cmd_vx:.2} m/s · achieved {:.3} · survival {:.0}% · falls {:.0}%",
-                    r.achieved_vx(), s.survival * 100.0, s.fall_rate * 100.0
+                    r.achieved_vx(),
+                    s.survival * 100.0,
+                    s.fall_rate * 100.0
                 );
                 // --replay also fetches the motion, not just the score, and
                 // reports what the viewer would get. Proves the rollout round
@@ -633,7 +691,10 @@ fn headless_probe(run: &str) -> ! {
 #[cfg(feature = "zealot")]
 fn headless_curriculum(iters_each: u64, rounds: usize) -> ! {
     let scenes = scene::list();
-    println!("curriculum over {} scene(s), {iters_each} iters each x {rounds} round(s):", scenes.len());
+    println!(
+        "curriculum over {} scene(s), {iters_each} iters each x {rounds} round(s):",
+        scenes.len()
+    );
     for sc in &scenes {
         println!("  {:<28} {}", sc.name, sc.summary());
     }
@@ -652,7 +713,9 @@ fn headless_curriculum(iters_each: u64, rounds: usize) -> ! {
             let line = g.samples.last().map(|s| {
                 format!(
                     "{:>9} steps  reward {:>7.4}  falls {:>5.1}%",
-                    s.step, s.reward, s.fall_rate * 100.0
+                    s.step,
+                    s.reward,
+                    s.fall_rate * 100.0
                 )
             });
             (g.samples.len(), !g.running, line)
@@ -704,7 +767,10 @@ pub fn maybe_headless() {
         headless_sweep();
     }
     if let Some(i) = args.iter().position(|a| a == "--headless") {
-        let n: u64 = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(2_000_000);
+        let n: u64 = args
+            .get(i + 1)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2_000_000);
         headless(n);
     }
 }
@@ -719,6 +785,7 @@ mod tests {
         // means a consumer never has to know the order, and a reweighting
         // cannot silently relabel a column.
         let s = trainer::Sample {
+            fall_rate_unmeasured: false,
             step: 8192,
             reward: 0.5,
             terms: vec![0.1, 0.2, 0.3, 0.4],
@@ -738,7 +805,10 @@ mod tests {
     fn a_sample_with_fewer_terms_than_names_omits_rather_than_invents() {
         // A checkpoint from an older reward shape must not have its missing
         // terms reported as zero — an absent term and a zero term differ.
-        let s = trainer::Sample { terms: vec![0.1], ..Default::default() };
+        let s = trainer::Sample {
+            terms: vec![0.1],
+            ..Default::default()
+        };
         let out = sample_json(&s);
         assert!(out.contains("track_lin_vel"));
         assert!(!out.contains("torque"), "{out}");
@@ -748,7 +818,10 @@ mod tests {
     fn a_non_finite_metric_does_not_break_the_stream() {
         // A diverged run produces NaN. Emitting the literal `NaN` would make the
         // line unparseable, taking the whole stream down with it.
-        let s = trainer::Sample { reward: f32::NAN, ..Default::default() };
+        let s = trainer::Sample {
+            reward: f32::NAN,
+            ..Default::default()
+        };
         assert!(sample_json(&s).contains(r#""reward":null"#));
     }
 
